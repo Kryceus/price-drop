@@ -35,6 +35,8 @@ DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "pricecompare")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
+APP_PORT = int(os.getenv("APP_PORT", "8080"))
 
 
 def utc_now():
@@ -82,10 +84,33 @@ def init_db():
                     recorded_at TIMESTAMPTZ NOT NULL
                 );
             """)
+
+            cur.execute("""
+                ALTER TABLE price_history
+                ALTER COLUMN product_id SET NOT NULL
+            """)
+
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'price_history_product_id_fkey'
+                    ) THEN
+                        ALTER TABLE price_history
+                        ADD CONSTRAINT price_history_product_id_fkey
+                        FOREIGN KEY (product_id)
+                        REFERENCES watched_products (product_id)
+                        ON DELETE CASCADE;
+                    END IF;
+                END
+                $$;
+            """)
         conn.commit()
 
 
-def save_product(snapshot):
+def save_product(snapshot, *, record_history_always=False):
     now = utc_now()
 
     with get_conn() as conn:
@@ -177,11 +202,30 @@ def save_product(snapshot):
 
             cur.execute(
                 """
-                INSERT INTO price_history (product_id, price, recorded_at)
-                VALUES (%s, %s, %s)
+                SELECT price
+                FROM price_history
+                WHERE product_id = %s
+                ORDER BY recorded_at DESC, id DESC
+                LIMIT 1
                 """,
-                (snapshot.product_id, snapshot.price, now),
+                (snapshot.product_id,),
             )
+            latest_history = cur.fetchone()
+
+            # Manual saves should still leave an audit trail, but background
+            # refreshes only add history when the price actually changes.
+            if (
+                record_history_always
+                or latest_history is None
+                or latest_history["price"] != snapshot.price
+            ):
+                cur.execute(
+                    """
+                    INSERT INTO price_history (product_id, price, recorded_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (snapshot.product_id, snapshot.price, now),
+                )
 
         conn.commit()
 
@@ -202,10 +246,6 @@ def remove_product(product_id):
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM watched_products WHERE product_id = %s",
-                (product_id,),
-            )
-            cur.execute(
-                "DELETE FROM price_history WHERE product_id = %s",
                 (product_id,),
             )
         conn.commit()
@@ -231,7 +271,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
-        if parsed.path in ("/", "/pricecompare.html"):
+        if parsed.path in ("/", "/dashboard", "/pricecompare.html", "/pricecompare.html"):
             html = (Path(__file__).parent / "pricecompare.html").read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -259,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 snapshot = fetch_product_snapshot(target)
-                save_product(snapshot)
+                save_product(snapshot, record_history_always=True)
                 self._send(200, snapshot.to_dict())
             except Exception as exc:
                 self._send(500, {"error": str(exc)})
@@ -366,5 +406,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print(f"Running at http://localhost:8000 using PostgreSQL database '{DB_NAME}'")
-    HTTPServer(("localhost", 8000), Handler).serve_forever()
+    print(
+        f"Running at http://{APP_HOST}:{APP_PORT} using PostgreSQL database '{DB_NAME}'"
+    )
+    HTTPServer((APP_HOST, APP_PORT), Handler).serve_forever()
