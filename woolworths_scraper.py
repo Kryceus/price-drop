@@ -83,25 +83,24 @@ def fetch_html(url: str, *, insecure: bool = False) -> str:
         context = ssl._create_unverified_context()
 
     try:
-        with urllib.request.urlopen(request, timeout=20, context=context) as response:
+        opener = _build_url_opener(context=context)
+        with opener.open(request, timeout=20) as response:
             return response.read().decode("utf-8", errors="replace")
     except ssl.SSLCertVerificationError:
         if insecure:
             raise
         # Local macOS/Python installs sometimes lack the CA chain needed here.
         fallback_context = ssl._create_unverified_context()
-        with urllib.request.urlopen(
-            request, timeout=20, context=fallback_context
-        ) as response:
+        opener = _build_url_opener(context=fallback_context)
+        with opener.open(request, timeout=20) as response:
             return response.read().decode("utf-8", errors="replace")
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", None)
         if insecure or not _is_ssl_cert_verify_error(reason):
             raise
         fallback_context = ssl._create_unverified_context()
-        with urllib.request.urlopen(
-            request, timeout=20, context=fallback_context
-        ) as response:
+        opener = _build_url_opener(context=fallback_context)
+        with opener.open(request, timeout=20) as response:
             return response.read().decode("utf-8", errors="replace")
 
 
@@ -185,9 +184,18 @@ def build_snapshot(
         product.get("StockLevelStatus"),
         product.get("Availability"),
     )
-    in_stock = None
-    if isinstance(availability, str):
-        in_stock = "instock" in availability.lower()
+    in_stock = _normalise_in_stock(
+        availability=availability,
+        explicit_values=(
+            product.get("IsAvailable"),
+            product.get("IsInStock"),
+            product.get("InStock"),
+            product.get("IsPurchasable"),
+            product.get("IsSoldOut"),
+            offer.get("inStock"),
+            offer.get("availability"),
+        ),
+    )
 
     image_url = _first_non_empty(
         (product.get("DetailsImagePaths") or [None])[0],
@@ -280,9 +288,69 @@ def _normalise_cup_price(cup_price: Any, has_cup_price: bool | None) -> str | No
     return str(cup_price)
 
 
+def _normalise_in_stock(
+    *, availability: Any, explicit_values: tuple[Any, ...]
+) -> bool | None:
+    for value in explicit_values:
+        stock_value = _coerce_stock_flag(value)
+        if stock_value is not None:
+            return stock_value
+
+    return _coerce_stock_flag(availability)
+
+
+def _coerce_stock_flag(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if not lowered:
+            return None
+        if lowered in {
+            "instock",
+            "in stock",
+            "available",
+            "available now",
+            "purchasable",
+            "true",
+            "1",
+            "yes",
+        }:
+            return True
+        if lowered in {
+            "outofstock",
+            "out of stock",
+            "soldout",
+            "sold out",
+            "unavailable",
+            "false",
+            "0",
+            "no",
+        }:
+            return False
+        if "instock" in lowered or "in stock" in lowered:
+            return True
+        if "outofstock" in lowered or "out of stock" in lowered:
+            return False
+        if "soldout" in lowered or "sold out" in lowered:
+            return False
+    return None
+
+
 def _is_ssl_cert_verify_error(reason: Any) -> bool:
     if isinstance(reason, ssl.SSLCertVerificationError):
         return True
     if isinstance(reason, ssl.SSLError):
         return "CERTIFICATE_VERIFY_FAILED" in str(reason)
     return "CERTIFICATE_VERIFY_FAILED" in str(reason)
+
+
+def _build_url_opener(*, context: ssl.SSLContext | None) -> urllib.request.OpenerDirector:
+    handlers: list[Any] = [urllib.request.ProxyHandler({})]
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers)

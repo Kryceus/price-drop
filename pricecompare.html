@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PriceWatch — Woolworths Tracker</title>
+<title>PriceWatch — Grocery Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -29,8 +29,30 @@
   --syne:'Syne',sans-serif;
   --inter:'Inter',sans-serif;
 }
+[data-theme="light"]{
+  --bg:#f5f7f4;
+  --surface:#ffffff;
+  --surface2:#eef2ee;
+  --surface3:#e3e9e3;
+  --border:#d9e2d8;
+  --border2:#c9d3c8;
+  --text:#101510;
+  --muted:#6d766d;
+  --muted2:#526052;
+  --green:#0f9f58;
+  --green-bg:rgba(15,159,88,0.10);
+  --green-border:rgba(15,159,88,0.22);
+  --red:#d74242;
+  --red-bg:rgba(215,66,66,0.10);
+  --red-border:rgba(215,66,66,0.22);
+  --amber:#b57600;
+  --amber-bg:rgba(181,118,0,0.11);
+  --amber-border:rgba(181,118,0,0.25);
+}
 html{scroll-behavior:smooth}
 body{font-family:var(--inter);background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+body.auth-loading .page{display:none!important}
+body.auth-loading nav{visibility:hidden}
  
 nav{
   position:sticky;top:0;z-index:100;
@@ -43,9 +65,17 @@ nav{
 .nav-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 2s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 .nav-tabs{display:flex;gap:2px}
+.nav-right{display:flex;align-items:center;gap:10px}
+.theme-toggle{height:38px;padding:0 14px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--syne);font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s;display:inline-flex;align-items:center;gap:8px}
+.theme-toggle:hover{border-color:var(--green);background:var(--surface3)}
 .nav-tab{font-family:var(--syne);font-size:13px;font-weight:600;padding:6px 16px;border-radius:6px;background:transparent;border:none;color:var(--muted2);cursor:pointer;transition:all 0.15s}
 .nav-tab:hover{color:var(--text);background:var(--surface2)}
 .nav-tab.active{color:var(--text);background:var(--surface3)}
+.nav-tab.hidden{display:none}
+.mode-chip{display:none;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;padding:6px 10px;border-radius:999px;border:1px solid var(--border2);color:var(--muted2);background:var(--surface2)}
+.mode-chip.demo{display:inline-flex;color:var(--amber);border-color:var(--amber-border);background:var(--amber-bg)}
+.nav-utility{display:none}
+.nav-utility.show{display:inline-flex}
 .badge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;font-size:10px;font-weight:700;margin-left:6px;background:var(--surface3);color:var(--muted2)}
 .badge.drop{background:var(--green);color:#000}
  
@@ -56,6 +86,45 @@ nav{
 .page-eyebrow{font-size:11px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;color:var(--green);margin-bottom:10px}
 .page-title{font-family:var(--syne);font-size:clamp(2rem,4vw,3rem);font-weight:800;line-height:1;letter-spacing:-1px;margin-bottom:6px}
 .page-sub{color:var(--muted2);font-size:14px;font-weight:300;margin-bottom:2.5rem}
+
+.auth-shell{display:grid;grid-template-columns:1.05fr 0.95fr;gap:1.5rem;align-items:stretch}
+@media(max-width:920px){.auth-shell{grid-template-columns:1fr}}
+.auth-hero{position:relative;overflow:hidden;background:
+  radial-gradient(circle at top left, rgba(0,230,118,0.16), transparent 36%),
+  linear-gradient(145deg, #0f1511 0%, #0d0d0d 55%, #141414 100%);
+  border:1px solid var(--border);border-radius:24px;padding:2rem;min-height:520px;display:flex;flex-direction:column;justify-content:space-between}
+.auth-hero::after{content:"";position:absolute;right:-70px;bottom:-80px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle, rgba(0,230,118,0.18), transparent 70%)}
+.auth-kicker{display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--green);margin-bottom:18px}
+.auth-kicker-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
+.auth-title{font-family:var(--syne);font-size:clamp(2.2rem,5vw,4rem);font-weight:800;line-height:0.95;letter-spacing:-1.5px;max-width:10ch;margin-bottom:16px}
+.auth-copy{max-width:48ch;color:#b8b8b8;font-size:14px;line-height:1.7}
+.auth-points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:22px}
+@media(max-width:560px){.auth-points{grid-template-columns:1fr}}
+.auth-point{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:14px}
+.auth-point strong{display:block;font-family:var(--syne);font-size:13px;font-weight:700;margin-bottom:6px}
+.auth-point span{font-size:12px;line-height:1.55;color:var(--muted2)}
+.auth-note{margin-top:20px;font-size:12px;color:var(--muted2)}
+.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:1.8rem;display:flex;flex-direction:column;justify-content:center}
+.auth-card h2{font-family:var(--syne);font-size:1.9rem;font-weight:800;letter-spacing:-0.8px;margin-bottom:8px}
+.auth-card p{font-size:13px;color:var(--muted2);line-height:1.7;margin-bottom:1.4rem}
+.auth-form{display:flex;flex-direction:column;gap:14px}
+.field-block{display:flex;flex-direction:column;gap:7px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.field-row{grid-template-columns:1fr}}
+.field-label{font-family:var(--syne);font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted2)}
+.field-input{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:13px 14px;font-family:var(--inter);font-size:13px;color:var(--text);outline:none;transition:border-color 0.15s,box-shadow 0.15s}
+.field-input::placeholder{color:var(--muted)}
+.field-input:focus{border-color:var(--green);box-shadow:0 0 0 4px rgba(0,230,118,0.08)}
+.auth-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted2)}
+@media(max-width:560px){.auth-meta{flex-direction:column;align-items:flex-start}}
+.auth-checkbox{display:flex;align-items:center;gap:8px}
+.auth-checkbox input{accent-color:var(--green)}
+.auth-link{color:var(--green);text-decoration:none;cursor:pointer}
+.auth-link:hover{text-decoration:underline}
+.btn-secondary{font-family:var(--syne);font-size:13px;font-weight:700;padding:0 22px;border-radius:10px;height:46px;background:transparent;color:var(--text);border:1px solid var(--border2);cursor:pointer;white-space:nowrap;transition:all 0.15s;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.btn-secondary:hover{border-color:var(--green);background:var(--surface2)}
+.auth-actions{display:flex;gap:10px;flex-wrap:wrap}
+.auth-disclaimer{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.6}
  
 .check-grid{display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start}
 @media(max-width:820px){.check-grid{grid-template-columns:1fr}}
@@ -84,7 +153,7 @@ nav{
 .preview-brand{font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);margin-bottom:6px}
 .preview-name{font-family:var(--syne);font-size:1.2rem;font-weight:700;line-height:1.25;margin-bottom:16px}
 .price-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
-.price-big{font-family:var(--syne);font-size:2.4rem;font-weight:800;letter-spacing:-1px}
+.price-big{font-family:var(--inter);font-size:2.8rem;font-weight:700;letter-spacing:-0.4px;line-height:1}
 .price-was{font-size:14px;color:var(--muted);text-decoration:line-through}
 .sale-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
 .cup{font-size:12px;color:var(--muted2);margin-bottom:14px}
@@ -118,6 +187,8 @@ nav{
 .stat-chip{font-size:12px;padding:5px 12px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);color:var(--muted2)}
 .stat-chip strong{color:var(--text)}
 .stat-chip.drop-chip{color:var(--green);border-color:var(--green-border)}
+.stat-chip.increase-chip{color:var(--red);border-color:var(--red-border)}
+.stat-chip.increase-chip strong{color:var(--red)}
 .btn-refresh{font-family:var(--syne);font-size:13px;font-weight:700;padding:10px 20px;border-radius:10px;background:var(--surface2);color:var(--text);border:1px solid var(--border2);cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:7px}
 .btn-refresh:hover{border-color:var(--green);background:var(--surface3)}
 .btn-refresh:disabled{opacity:0.4;cursor:not-allowed}
@@ -138,8 +209,11 @@ nav{
 .tile-brand{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);margin-bottom:4px}
 .tile-name{font-family:var(--syne);font-size:14px;font-weight:700;line-height:1.2;margin-bottom:10px}
 .tile-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
-.tile-price{font-family:var(--syne);font-size:22px;font-weight:800}
-.tile-prev{font-size:12px;color:var(--muted);text-decoration:line-through}
+.tile-price{font-family:var(--inter);font-size:22px;font-weight:600;letter-spacing:0;line-height:1.1}
+.tile-change{font-size:12px;font-weight:700;padding:3px 8px;border-radius:20px;border:1px solid transparent}
+.tile-change.up{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+.tile-change.down{background:var(--green-bg);color:var(--green);border-color:var(--green-border)}
+.tile-was{font-size:12px;color:var(--muted2);letter-spacing:0.4px;font-weight:600}
 .tile-sale{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
 .tile-meta{font-size:12px;color:var(--muted2);margin-bottom:2px}
  
@@ -178,34 +252,188 @@ nav{
 @keyframes spinr{to{transform:rotate(360deg)}}
 </style>
 </head>
-<body>
+<body class="auth-loading">
  
 <nav>
   <div class="nav-brand"><span class="nav-dot"></span>PriceWatch</div>
-  <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showPage('check')">Price Check</button>
-    <button class="nav-tab" onclick="showPage('dashboard')" id="dash-tab">Dashboard</button>
+  <div class="nav-right">
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-page="login" data-auth="public" onclick="showPage('login')">Login</button>
+      <button class="nav-tab" data-page="signup" data-auth="public" onclick="showPage('signup')">Sign Up</button>
+      <button class="nav-tab" data-page="check" data-auth="private" onclick="showPage('check')">Price Check</button>
+      <button class="nav-tab" data-page="dashboard" data-auth="private" onclick="showPage('dashboard')" id="dash-tab">Dashboard</button>
+      <button class="nav-tab hidden" data-page="account" data-auth="account" onclick="showPage('account')" id="account-tab">Account</button>
+    </div>
+    <button class="theme-toggle" type="button" id="theme-toggle" onclick="toggleTheme()"></button>
+    <span class="mode-chip" id="mode-chip"></span>
+    <button class="btn-secondary nav-utility" type="button" id="nav-exit-btn"></button>
   </div>
 </nav>
- 
+
+<!-- LOGIN PAGE -->
+<div class="page active" id="page-login">
+  <div class="auth-shell">
+    <section class="auth-hero">
+      <div>
+        <div class="auth-kicker"><span class="auth-kicker-dot"></span>Price alerts for real shoppers</div>
+        <h1 class="auth-title">Track the basket before the price moves.</h1>
+        <p class="auth-copy">Sign in to keep your watchlist, refresh history, and future alerts in one place across web and mobile. The frontend is ready now, and we can wire secure auth behind it next.</p>
+        <div class="auth-points">
+          <div class="auth-point">
+            <strong>Watchlist sync</strong>
+            <span>Saved products, recent checks, and price movement all tied to one account.</span>
+          </div>
+          <div class="auth-point">
+            <strong>Alert ready</strong>
+            <span>Email, push, or SMS preferences can plug into the same user profile later.</span>
+          </div>
+          <div class="auth-point">
+            <strong>Web first</strong>
+            <span>The same product flow can later power a mobile app without throwing this UI away.</span>
+          </div>
+        </div>
+      </div>
+      <div class="auth-note">Best next backend choice: hashed passwords plus secure server-side sessions first, then add tokens later only if mobile APIs truly need them.</div>
+    </section>
+    <section class="auth-card">
+      <div class="page-eyebrow">Account</div>
+      <h2>Welcome back</h2>
+      <p>Sign in with your username or email and password. This now connects to a real local users table and session-backed auth.</p>
+      <div id="flash-login"></div>
+      <form class="auth-form" autocomplete="off" onsubmit="demoAuth(event, 'login')">
+        <div class="field-block">
+          <label class="field-label" for="login-email">Email or Username</label>
+          <input class="field-input" id="login-email" type="text" placeholder="fadhil or fadhil@example.com" autocomplete="username" required>
+        </div>
+        <div class="field-block">
+          <label class="field-label" for="login-password">Password</label>
+          <input class="field-input" id="login-password" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+        </div>
+        <div class="auth-meta">
+          <label class="auth-checkbox"><input type="checkbox"> Keep me signed in</label>
+          <a class="auth-link" onclick="showPage('signup')">Need an account?</a>
+        </div>
+        <div class="auth-actions">
+          <button class="btn-primary" type="submit">Sign In</button>
+          <button class="btn-secondary" type="button" onclick="enterDemo()">Continue to Demo</button>
+        </div>
+      </form>
+      <div class="auth-disclaimer">Passwords are now stored hashed in the database and logins use a server-issued session cookie. For production later, move this behind HTTPS on an always-on host.</div>
+    </section>
+  </div>
+</div>
+
+<!-- SIGNUP PAGE -->
+<div class="page" id="page-signup">
+  <div class="auth-shell">
+    <section class="auth-hero">
+      <div>
+        <div class="auth-kicker"><span class="auth-kicker-dot"></span>New account setup</div>
+        <h1 class="auth-title">Create your tracker space.</h1>
+        <p class="auth-copy">Start with a lightweight account flow now, then layer in secure sessions, alert settings, and app delivery once the user model is live.</p>
+        <div class="auth-points">
+          <div class="auth-point">
+            <strong>Saved products</strong>
+            <span>Each user gets their own watchlist and price history view.</span>
+          </div>
+          <div class="auth-point">
+            <strong>Future alerts</strong>
+            <span>Notification preferences can be stored per person instead of globally.</span>
+          </div>
+          <div class="auth-point">
+            <strong>Upgrade path</strong>
+            <span>We can start with session auth and still add JWT-based APIs later if a mobile app needs them.</span>
+          </div>
+        </div>
+      </div>
+      <div class="auth-note">You do not lock yourself into JWT now. A clean user table and auth service boundary makes later upgrades straightforward.</div>
+    </section>
+    <section class="auth-card">
+      <div class="page-eyebrow">Sign Up</div>
+      <h2>Create an account</h2>
+      <p>Create a real local account here. Email is optional now, so username becomes the main required sign-in option.</p>
+      <div id="flash-signup"></div>
+      <form class="auth-form" autocomplete="off" onsubmit="demoAuth(event, 'signup')">
+        <div class="field-row">
+          <div class="field-block">
+            <label class="field-label" for="signup-first">First name</label>
+            <input class="field-input" id="signup-first" type="text" placeholder="Fadhil" autocomplete="given-name" required>
+          </div>
+          <div class="field-block">
+            <label class="field-label" for="signup-last">Last name</label>
+            <input class="field-input" id="signup-last" type="text" placeholder="Hill" autocomplete="family-name" required>
+          </div>
+        </div>
+        <div class="field-block">
+          <label class="field-label" for="signup-username">Username</label>
+          <input class="field-input" id="signup-username" type="text" placeholder="fadhil" autocomplete="username" required>
+        </div>
+        <div class="field-block">
+          <label class="field-label" for="signup-email">Email Optional</label>
+          <input class="field-input" id="signup-email" type="email" placeholder="fadhil@example.com" autocomplete="email">
+        </div>
+        <div class="field-row">
+          <div class="field-block">
+            <label class="field-label" for="signup-password">Password</label>
+            <input class="field-input" id="signup-password" type="password" placeholder="Create a password" autocomplete="new-password" required>
+          </div>
+          <div class="field-block">
+            <label class="field-label" for="signup-confirm">Confirm password</label>
+            <input class="field-input" id="signup-confirm" type="password" placeholder="Repeat password" autocomplete="new-password" required>
+          </div>
+        </div>
+        <div class="auth-meta">
+          <label class="auth-checkbox"><input type="checkbox" required> I agree to receive account alerts</label>
+          <a class="auth-link" onclick="showPage('login')">Already have an account?</a>
+        </div>
+        <div class="auth-actions">
+          <button class="btn-primary" type="submit">Create Account</button>
+          <button class="btn-secondary" type="button" onclick="showPage('login')">Back to Login</button>
+        </div>
+      </form>
+      <div class="auth-disclaimer">Once we wire the backend, this form can create a real user without redesigning the page again.</div>
+    </section>
+  </div>
+</div>
+
+<!-- ACCOUNT PAGE -->
+<div class="page" id="page-account">
+  <div class="page-eyebrow">Profile</div>
+  <h1 class="page-title">Account</h1>
+  <p class="page-sub">Your personal PriceWatch account and separate dashboard space.</p>
+  <div id="flash-account"></div>
+  <div class="input-card">
+    <div class="input-label">Signed In As</div>
+    <div style="display:grid;gap:12px">
+      <div class="tile-meta" id="account-name">Username</div>
+      <div class="tile-name" id="account-username">-</div>
+      <div class="tile-meta" id="account-email">Email not set</div>
+      <div class="auth-actions" style="margin-top:10px">
+        <button class="btn-primary" type="button" onclick="showPage('dashboard')">Open My Dashboard</button>
+        <button class="btn-secondary" type="button" onclick="logoutAccount()">Log Out</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- CHECK PAGE -->
-<div class="page active" id="page-check">
-  <div class="page-eyebrow">Woolworths</div>
+<div class="page" id="page-check">
+  <div class="page-eyebrow">Groceries</div>
   <h1 class="page-title">Price Check</h1>
-  <p class="page-sub">Paste a product URL — preview the price, then save it to your watchlist.</p>
+  <p class="page-sub" id="check-sub">Paste a product URL from Woolworths, Coles, IGA, or ALDI to preview it and save it to your watchlist.</p>
   <div id="flash-check"></div>
   <div class="check-grid">
     <div>
       <div class="input-card">
         <div class="input-label">Product URL or ID</div>
         <div class="url-row">
-          <input class="url-input" id="url-input" type="text" placeholder="https://www.woolworths.com.au/shop/productdetails/..."/>
+          <input class="url-input" id="url-input" type="text" placeholder="Paste a product URL from Woolworths, Coles, IGA, or ALDI"/>
           <button class="btn-primary" id="check-btn" onclick="doCheck()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Check
           </button>
         </div>
-        <div class="hint">Also accepts a numeric ID, e.g. <code style="background:var(--surface3);padding:1px 5px;border-radius:4px;font-size:11px">123456</code></div>
+        <div class="hint">Woolworths also accepts a numeric product ID, e.g. <code style="background:var(--surface3);padding:1px 5px;border-radius:4px;font-size:11px">123456</code></div>
         <div class="load-bar" id="check-loader"><div class="load-bar-inner"></div></div>
       </div>
       <div id="preview-area">
@@ -223,7 +451,7 @@ nav{
 <div class="page" id="page-dashboard">
   <div class="page-eyebrow">Watching</div>
   <h1 class="page-title">Dashboard</h1>
-  <p class="page-sub">Your saved products. Hit Refresh All to check for price drops.</p>
+  <p class="page-sub" id="dash-sub">Your saved products. Hit Refresh All to check for price changes.</p>
   <div id="flash-dash"></div>
   <div class="dash-toolbar">
     <div class="stat-chips" id="dash-stats"></div>
@@ -255,20 +483,101 @@ nav{
 </div>
  
 <script>
-const API = 'http://localhost:8080';
+const API = window.location.origin;
+const RECENT_CHANGES_KEY = 'pricewatch_recent_changes';
+const APP_ACCESS_KEY = 'pricewatch_app_access';
+const APP_MODE_KEY = 'pricewatch_mode';
+const APP_PAGE_KEY = 'pricewatch_current_page';
+const APP_THEME_KEY = 'pricewatch_theme';
 let currentPreview = null;
 let removeTarget = null;
 let toastTimer = null;
 let watchlist = [];
+let recentChanges = loadRecentChanges();
+let appUnlocked = loadAppAccess();
+let appMode = loadAppMode();
+let currentUser = null;
+let currentPage = 'login';
+let currentTheme = loadTheme();
  
 // ── NAV ──────────────────────────────────────────────────────────────────────
 function showPage(name) {
+  if (!appUnlocked && (name === 'check' || name === 'dashboard' || name === 'account')) {
+    name = 'login';
+  }
+  if (name === 'account' && !currentUser) {
+    name = 'dashboard';
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-tab')[name === 'check' ? 0 : 1].classList.add('active');
+  const tab = document.querySelector(`.nav-tab[data-page="${name}"]`);
+  if (tab) tab.classList.add('active');
+  currentPage = name;
+  persistCurrentPage();
   if (name === 'dashboard') loadDashboard();
+  if (name === 'account') renderAccountPage();
 }
+
+function loadTheme() {
+  try {
+    return localStorage.getItem(APP_THEME_KEY) || 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+function persistTheme() {
+  try {
+    localStorage.setItem(APP_THEME_KEY, currentTheme);
+  } catch {}
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  const toggle = document.getElementById('theme-toggle');
+  if (toggle) {
+    toggle.textContent = currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode';
+  }
+}
+
+function toggleTheme() {
+  currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  persistTheme();
+  applyTheme();
+}
+
+/* function demoAuth(event, mode) {
+  event.preventDefault();
+  clearFlash(mode);
+  if (mode === 'login') return submitLogin();
+    const password = document.getElementById('login-password').value.trim();
+    if (!password) {
+      showFlash('login', 'err', 'Enter a password to continue, or use Continue to Demo.');
+      return;
+    }
+    appUnlocked = true;
+    persistAppAccess();
+    updateNavVisibility();
+    showPage('check');
+    showToast('✓', 'Signed in', 'App pages are now unlocked. This is still frontend-only until we wire real auth.', 'var(--green)');
+    return;
+  }
+  showToast('+', 'UI ready for sign up', 'The sign up flow is styled and ready. Next we can connect this to a users table and password hashing.', 'var(--green)');
+}
+
+function enterDemo() {
+  clearFlash('login');
+  currentUser = null;
+  appUnlocked = true;
+  appMode = 'demo';
+  persistAppAccess();
+  persistAppMode();
+  updateAppChrome();
+  updateNavVisibility();
+  showPage('check');
+  showToast('✓', 'Demo mode on', 'You are now using the live demo view backed by the current shared database.', 'var(--green)');
+} */
  
 // ── CHECK ─────────────────────────────────────────────────────────────────────
 document.getElementById('url-input').addEventListener('keydown', e => { if (e.key === 'Enter') doCheck(); });
@@ -300,7 +609,7 @@ function setCheckLoading(on) {
  
 function renderPreview(p) {
   const savings = p.was_price && p.price ? p.was_price - p.price : null;
-  const pct = savings ? Math.round(savings / p.was_price * 100) : null;
+  const pct = savings && savings > 0 ? Math.round(savings / p.was_price * 100) : null;
   const sc = p.in_stock === null ? 'unknown' : p.in_stock ? 'in' : 'out';
   const st = p.in_stock === null ? 'Stock unknown' : p.in_stock ? 'In stock' : 'Out of stock';
   document.getElementById('preview-area').innerHTML = `
@@ -393,28 +702,32 @@ function renderGrid() {
     return;
   }
  
-  const drops = watchlist.filter(p => p.has_drop).length;
+  const changeEntries = watchlist.map(getDisplayChange).filter(Boolean);
+  const drops = changeEntries.filter(change => change.direction === 'down').length;
+  const increases = changeEntries.filter(change => change.direction === 'up').length;
   stats.innerHTML = `
     <span class="stat-chip"><strong>${watchlist.length}</strong> tracked</span>
-    ${drops ? `<span class="stat-chip drop-chip"><strong>${drops}</strong> price drop${drops > 1 ? 's' : ''} ↓</span>` : ''}`;
+    ${drops ? `<span class="stat-chip drop-chip"><strong>${drops}</strong> drop${drops > 1 ? 's' : ''} ↓</span>` : ''}
+    ${increases ? `<span class="stat-chip increase-chip"><strong>${increases}</strong> increase${increases > 1 ? 's' : ''} ↑</span>` : ''}`;
  
   grid.innerHTML = watchlist.map(renderTile).join('');
 }
  
 function renderTile(p) {
-  const hasPrevious = p.previous_price != null && p.current_price != null;
-  const priceDiff = hasPrevious ? p.current_price - p.previous_price : null;
-  const hasDrop = hasPrevious && priceDiff < 0;
-  const hasIncrease = hasPrevious && priceDiff > 0;
+  const recentChange = getDisplayChange(p);
+  const hasDrop = recentChange?.direction === 'down';
+  const hasIncrease = recentChange?.direction === 'up';
   const savings = p.was_price && p.current_price ? p.was_price - p.current_price : null;
-  const pct = savings ? Math.round(savings / p.was_price * 100) : null;
-  const stockText = p.in_stock === 1 ? 'In stock' : p.in_stock === 0 ? 'Out of stock' : 'Stock unknown';
+  const pct = savings && savings > 0 ? Math.round(savings / p.was_price * 100) : null;
+  const stockText = p.in_stock === null ? 'Stock unknown' : p.in_stock ? 'In stock' : 'Out of stock';
   const checked = p.last_checked_at ? timeAgo(p.last_checked_at) : 'Never';
-  const changeAmt = hasPrevious ? Math.abs(priceDiff).toFixed(2) : null;
- 
+  const changeAmt = recentChange ? recentChange.amount.toFixed(2) : null;
+  const wasLabel = recentChange
+    ? `Was $${recentChange.oldPrice.toFixed(2)}`
+    : (p.was_price != null ? `Was $${p.was_price.toFixed(2)}` : '');
+  const saleLabel = pct ? `${pct}% off` : '';
+
   return `<div class="tile ${hasDrop ? 'has-drop' : ''} ${hasIncrease ? 'has-increase' : ''}" id="tile-${p.product_id}">
-    ${hasDrop ? `<div class="drop-banner">↓ Dropped $${changeAmt} - was $${p.previous_price.toFixed(2)}</div>` : ''}
-    ${hasIncrease ? `<div class="increase-banner">↑ Increased $${changeAmt} - was $${p.previous_price.toFixed(2)}</div>` : ''}
     <div class="tile-img">
       ${p.image_url
         ? `<img src="${esc(p.image_url)}" alt="" onerror="this.style.display='none'">`
@@ -425,11 +738,10 @@ function renderTile(p) {
       <div class="tile-name">${esc(p.name || p.product_id)}</div>
       <div class="tile-price-row">
         <span class="tile-price">${p.current_price != null ? '$' + p.current_price.toFixed(2) : '—'}</span>
-        ${hasDrop || hasIncrease
-          ? `<span class="tile-prev">$${p.previous_price.toFixed(2)}</span>`
-          : p.was_price ? `<span class="tile-prev">$${p.was_price.toFixed(2)}</span>` : ''}
-        ${pct ? `<span class="tile-sale">${pct}% off</span>` : ''}
+        ${hasDrop ? `<span class="tile-change down">↓ $${changeAmt}</span>` : ''}
+        ${hasIncrease ? `<span class="tile-change up">↑ $${changeAmt}</span>` : ''}
       </div>
+      ${(wasLabel || saleLabel) ? `<div class="tile-meta"><span class="tile-was">${wasLabel}</span>${saleLabel ? ` <span class="tile-sale">${saleLabel}</span>` : ''}</div>` : ''}
       ${p.cup_price ? `<div class="tile-meta">${esc(p.cup_price)}</div>` : ''}
       <div class="tile-meta">${stockText}</div>
     </div>
@@ -448,14 +760,14 @@ function renderTile(p) {
     </div>
   </div>`;
 }
- 
+
 async function loadHistories() {
   for (const p of watchlist) {
     try {
       const data = await apiFetch(`/history?product_id=${enc(p.product_id)}`);
       const list = document.getElementById('hist-list-' + p.product_id);
       if (!list) continue;
-      const rows = (data.history || []).slice().reverse().slice(0, 6);
+      const rows = (data.history || []).slice().reverse().slice(0, 5);
       if (!rows.length) {
         list.innerHTML = '<span style="font-size:12px;color:var(--muted)">No history yet</span>';
         continue;
@@ -477,6 +789,19 @@ async function refreshAll() {
   clearFlash('dash');
   try {
     const data = await apiFetch('/refresh-all');
+    recentChanges = {};
+    for (const item of (data.updated || [])) {
+      if (item.old_price == null || item.new_price == null || item.old_price === item.new_price) {
+        continue;
+      }
+      recentChanges[item.product_id] = {
+        direction: item.new_price < item.old_price ? 'down' : 'up',
+        amount: Math.abs(item.new_price - item.old_price),
+        oldPrice: item.old_price,
+        newPrice: item.new_price,
+      };
+    }
+    persistRecentChanges();
     await syncWatchlist();
     renderGrid();
     await loadHistories();
@@ -528,17 +853,304 @@ async function apiFetch(path) {
   if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
+
+async function apiPost(path, payload) {
+  const res = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function hydrateAuthState() {
+  try {
+    const data = await apiFetch('/auth/me');
+    if (data.user) {
+      currentUser = data.user;
+      appUnlocked = true;
+      appMode = 'account';
+      persistAppAccess();
+      persistAppMode();
+      updateAppChrome();
+      updateNavVisibility();
+      const restoredPage = loadCurrentPage();
+      if (restoredPage && restoredPage !== 'login' && restoredPage !== 'signup') {
+        showPage(restoredPage);
+      } else {
+        showPage('check');
+      }
+      document.body.classList.remove('auth-loading');
+      return;
+    }
+  } catch {}
+
+  if (!appUnlocked) {
+    appMode = 'guest';
+    persistAppMode();
+    updateAppChrome();
+    updateNavVisibility();
+    showPage('login');
+  } else {
+    if (!appMode || appMode === 'guest') appMode = 'demo';
+    persistAppMode();
+    updateAppChrome();
+    updateNavVisibility();
+    const restoredPage = loadCurrentPage();
+    if (restoredPage && restoredPage !== 'login' && restoredPage !== 'signup') {
+      showPage(restoredPage);
+    } else {
+      showPage('check');
+    }
+  }
+  document.body.classList.remove('auth-loading');
+}
+
+function demoAuth(event, mode) {
+  event.preventDefault();
+  clearFlash(mode);
+  if (mode === 'login') return submitLogin();
+  return submitSignup();
+}
+
+function enterDemo() {
+  clearFlash('login');
+  currentUser = null;
+  appUnlocked = true;
+  appMode = 'demo';
+  persistAppAccess();
+  persistAppMode();
+  updateAppChrome();
+  updateNavVisibility();
+  showPage('check');
+  showToast('✓', 'Demo mode on', 'You are now using the live demo view backed by the current shared database.', 'var(--green)');
+}
+
+async function submitLogin() {
+  const identifier = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  if (!identifier || !password) {
+    showFlash('login', 'err', 'Enter your username/email and password, or use Continue to Demo.');
+    return;
+  }
+  try {
+    const data = await apiPost('/auth/login', { identifier, password });
+    currentUser = data.user;
+    appUnlocked = true;
+    appMode = 'account';
+    persistAppAccess();
+    persistAppMode();
+    updateAppChrome();
+    updateNavVisibility();
+    showPage('check');
+    showToast('✓', 'Signed in', `Welcome back, ${data.user.first_name || data.user.username}.`, 'var(--green)');
+  } catch (e) {
+    showFlash('login', 'err', e.message);
+  }
+}
+
+async function submitSignup() {
+  const first_name = document.getElementById('signup-first').value.trim();
+  const last_name = document.getElementById('signup-last').value.trim();
+  const username = document.getElementById('signup-username').value.trim();
+  const email = document.getElementById('signup-email').value.trim();
+  const password = document.getElementById('signup-password').value.trim();
+  const confirm_password = document.getElementById('signup-confirm').value.trim();
+  if (!first_name || !last_name || !username || !password || !confirm_password) {
+    showFlash('signup', 'err', 'Fill in the required account details to sign up.');
+    return;
+  }
+  try {
+    const data = await apiPost('/auth/signup', {
+      first_name,
+      last_name,
+      username,
+      email,
+      password,
+      confirm_password,
+    });
+    currentUser = data.user;
+    appUnlocked = true;
+    appMode = 'account';
+    persistAppAccess();
+    persistAppMode();
+    updateAppChrome();
+    updateNavVisibility();
+    showPage('check');
+    showToast('✓', 'Account created', `Welcome, ${data.user.first_name || data.user.username}.`, 'var(--green)');
+  } catch (e) {
+    showFlash('signup', 'err', e.message);
+  }
+}
  
 function updateDashBadge() {
   const tab = document.getElementById('dash-tab');
   const existing = tab.querySelector('.badge');
   if (existing) existing.remove();
   if (!watchlist.length) return;
-  const drops = watchlist.filter(p => p.has_drop).length;
+  const drops = watchlist.map(getDisplayChange).filter(change => change?.direction === 'down').length;
   const b = document.createElement('span');
   b.className = 'badge' + (drops ? ' drop' : '');
   b.textContent = drops || watchlist.length;
   tab.appendChild(b);
+}
+
+function getDisplayChange(product) {
+  const recentChange = recentChanges[product.product_id];
+  if (recentChange) return recentChange;
+  if (product.previous_price == null || product.current_price == null || product.previous_price === product.current_price) {
+    return null;
+  }
+  return {
+    direction: product.current_price < product.previous_price ? 'down' : 'up',
+    amount: Math.abs(product.current_price - product.previous_price),
+    oldPrice: product.previous_price,
+    newPrice: product.current_price,
+  };
+}
+
+function loadRecentChanges() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_CHANGES_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function loadAppAccess() {
+  try {
+    return localStorage.getItem(APP_ACCESS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function loadAppMode() {
+  try {
+    return localStorage.getItem(APP_MODE_KEY) || 'guest';
+  } catch {
+    return 'guest';
+  }
+}
+
+function persistRecentChanges() {
+  try {
+    localStorage.setItem(RECENT_CHANGES_KEY, JSON.stringify(recentChanges));
+  } catch {}
+}
+
+function persistAppAccess() {
+  try {
+    localStorage.setItem(APP_ACCESS_KEY, appUnlocked ? '1' : '0');
+  } catch {}
+}
+
+function persistAppMode() {
+  try {
+    localStorage.setItem(APP_MODE_KEY, appMode || 'guest');
+  } catch {}
+}
+
+function loadCurrentPage() {
+  try {
+    return localStorage.getItem(APP_PAGE_KEY) || 'login';
+  } catch {
+    return 'login';
+  }
+}
+
+function persistCurrentPage() {
+  try {
+    localStorage.setItem(APP_PAGE_KEY, currentPage || 'login');
+  } catch {}
+}
+
+function updateNavVisibility() {
+  const isAccount = !!currentUser;
+  document.querySelectorAll('.nav-tab[data-auth="public"]').forEach(tab => {
+    tab.classList.toggle('hidden', appUnlocked);
+  });
+  document.querySelectorAll('.nav-tab[data-auth="private"]').forEach(tab => {
+    tab.classList.toggle('hidden', !appUnlocked);
+  });
+  document.querySelectorAll('.nav-tab[data-auth="account"]').forEach(tab => {
+    tab.classList.toggle('hidden', !isAccount);
+  });
+}
+
+function updateAppChrome() {
+  const dashSub = document.getElementById('dash-sub');
+  const checkSub = document.getElementById('check-sub');
+  const accountTab = document.getElementById('account-tab');
+  const modeChip = document.getElementById('mode-chip');
+  const navExitBtn = document.getElementById('nav-exit-btn');
+  if (appMode === 'account' && currentUser) {
+    dashSub.textContent = `Your personal watchlist for ${currentUser.username}. Hit Refresh All to check for price changes.`;
+    checkSub.textContent = 'Paste a product URL to preview it and save it to your personal dashboard.';
+    accountTab.textContent = currentUser.username;
+    modeChip.textContent = '';
+    modeChip.className = 'mode-chip';
+    navExitBtn.textContent = 'Log Out';
+    navExitBtn.classList.add('show');
+    navExitBtn.onclick = logoutAccount;
+  } else {
+    dashSub.textContent = 'Demo dashboard using the shared watchlist. Hit Refresh All to check for price changes.';
+    checkSub.textContent = 'Paste a product URL from Woolworths, Coles, IGA, or ALDI to preview it and save it to your watchlist.';
+    accountTab.textContent = 'Account';
+    if (appMode === 'demo') {
+      modeChip.textContent = 'Demo';
+      modeChip.className = 'mode-chip demo';
+      navExitBtn.textContent = 'Leave Demo';
+      navExitBtn.classList.add('show');
+      navExitBtn.onclick = leaveDemo;
+    } else {
+      modeChip.textContent = '';
+      modeChip.className = 'mode-chip';
+      navExitBtn.textContent = '';
+      navExitBtn.classList.remove('show');
+      navExitBtn.onclick = null;
+    }
+  }
+}
+
+function renderAccountPage() {
+  if (!currentUser) return;
+  document.getElementById('account-name').textContent = `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() || currentUser.username;
+  document.getElementById('account-username').textContent = '@' + currentUser.username;
+  document.getElementById('account-email').textContent = currentUser.email || 'Email not set';
+}
+
+async function logoutAccount() {
+  try {
+    await apiPost('/auth/logout', {});
+  } catch {}
+  currentUser = null;
+  appUnlocked = false;
+  appMode = 'guest';
+  persistAppAccess();
+  persistAppMode();
+  currentPage = 'signup';
+  persistCurrentPage();
+  updateAppChrome();
+  updateNavVisibility();
+  showPage('signup');
+  showToast('✓', 'Logged out', 'Your account session has been cleared.', 'var(--muted2)');
+}
+
+function leaveDemo() {
+  currentUser = null;
+  appUnlocked = false;
+  appMode = 'guest';
+  persistAppAccess();
+  persistAppMode();
+  currentPage = 'signup';
+  persistCurrentPage();
+  updateAppChrome();
+  updateNavVisibility();
+  showPage('signup');
+  showToast('✓', 'Left demo', 'You are back at the auth screens.', 'var(--muted2)');
 }
  
 function showFlash(page, type, msg) {
@@ -574,6 +1186,9 @@ function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt
 function enc(s) { return encodeURIComponent(s); }
  
 // ── INIT ──────────────────────────────────────────────────────────────────────
+applyTheme();
+updateNavVisibility();
+hydrateAuthState();
 syncWatchlist().then(updateDashBadge).catch(() => {});
 </script>
 </body>

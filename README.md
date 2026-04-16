@@ -1,6 +1,6 @@
 # PriceCompare
 
-Local prototype for tracking Woolworths product prices from direct product URLs.
+Local prototype for tracking grocery product prices from direct product URLs.
 
 ## Setup
 
@@ -20,7 +20,7 @@ cp .env.example .env
 
 ## Current flow
 
-1. User pastes a Woolworths product URL into the app
+1. User pastes a product URL into the app
 2. The user presses `Check Price`
 3. The app previews the product on the current page
 4. The preview shows the product name, current price, and whether it is on sale
@@ -29,27 +29,49 @@ cp .env.example .env
 7. Later, the user clicks a refresh button on the dashboard to re-check tracked prices
 8. If the latest price is lower than the previous saved price, the dashboard highlights the drop
 
-## Why URL input first
-
-Woolworths currently disallows `/shop/search` in `robots.txt`, so this prototype intentionally starts with direct product URLs instead of keyword search.
-
 ## Run the web app
 
 ```bash
 python3 server.py
 ```
 
-Open `http://127.0.0.1:8000`.
+Open `http://127.0.0.1:8080`.
 
 Use the pages like this:
 
 - `/`: check a single product price and preview it without saving
 - `/dashboard`: see tracked products and refresh their prices
 
+## Run automated checks
+
+For a student/demo project, the default interval is every 6 hours.
+
+Run one automated pass:
+
+```bash
+python3 run_checks.py --once
+```
+
+Run the background checker on the demo interval:
+
+```bash
+python3 run_checks.py
+```
+
+You can override the interval if needed:
+
+```bash
+python3 run_checks.py --interval-seconds 14400
+```
+
+The automated checker updates `last_checked_at` every run, but it only adds a new `price_history` row when the price actually changes. That keeps the history useful instead of filling it with duplicate entries.
+
 ## Files
 
 - `server.py`: local web server and PostgreSQL-backed watchlist API
+- `run_checks.py`: background checker for scheduled automated scrapes
 - `woolworths_scraper.py`: reusable Woolworths scraping helpers
+- `store_scrapers.py`: routes supported retailer URLs to the right scraper
 
 ## Good next steps
 
