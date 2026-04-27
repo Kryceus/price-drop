@@ -9,11 +9,14 @@ import os
 import hashlib
 import hmac
 import secrets
+import time
 
 import psycopg
 from psycopg.rows import dict_row
 
 from store_scrapers import fetch_product_snapshot
+from generic_product_extractor import normalize_target_url
+from woolworths_scraper import ProductSnapshot
 
 
 def load_env_file():
@@ -51,10 +54,56 @@ FRONTEND_ORIGINS = {
     ).split(",")
     if origin.strip()
 }
+PREVIEW_CACHE_TTL_SECONDS = 90
+_snapshot_cache = {}
 
 
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _normalize_cache_key(target):
+    normalized = normalize_target_url(target)
+    return normalized.normalized_url
+
+
+def _get_cached_snapshot(target):
+    try:
+        cache_key = _normalize_cache_key(target)
+    except Exception:
+        return None
+
+    cached = _snapshot_cache.get(cache_key)
+    if cached is None:
+        return None
+
+    expires_at, snapshot = cached
+    if expires_at <= time.time():
+        _snapshot_cache.pop(cache_key, None)
+        return None
+    return snapshot
+
+
+def _cache_snapshot(target, snapshot):
+    try:
+        cache_key = _normalize_cache_key(target)
+    except Exception:
+        return
+    _snapshot_cache[cache_key] = (
+        time.time() + PREVIEW_CACHE_TTL_SECONDS,
+        snapshot,
+    )
+
+
+def resolve_product_snapshot(target, *, allow_cache=False):
+    if allow_cache:
+        cached = _get_cached_snapshot(target)
+        if cached is not None:
+            return cached
+
+    snapshot = fetch_product_snapshot(target)
+    _cache_snapshot(target, snapshot)
+    return snapshot
 
 
 def get_conn():
@@ -97,10 +146,20 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS products (
                     id SERIAL PRIMARY KEY,
                     external_product_id TEXT NOT NULL UNIQUE,
+                    original_url TEXT,
                     product_url TEXT NOT NULL,
+                    domain TEXT,
+                    merchant_name TEXT,
+                    status TEXT,
+                    last_error TEXT,
+                    last_error_at TIMESTAMPTZ,
+                    last_seen_at TIMESTAMPTZ,
+                    extraction_source TEXT,
+                    extraction_confidence DOUBLE PRECISION,
                     name TEXT,
                     brand TEXT,
                     current_price DOUBLE PRECISION,
+                    currency TEXT,
                     original_price DOUBLE PRECISION,
                     was_price DOUBLE PRECISION,
                     cup_price TEXT,
@@ -142,16 +201,16 @@ def init_db():
                 BEGIN
                     IF EXISTS (
                         SELECT 1
-                                                FROM information_schema.tables
-                                                WHERE table_schema = 'public'
-                                                    AND table_name = 'watched_products'
-                                                    AND table_type = 'BASE TABLE'
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name = 'watched_products'
+                          AND table_type = 'BASE TABLE'
                     ) AND NOT EXISTS (
                         SELECT 1
-                                                FROM pg_class c
-                                                JOIN pg_namespace n ON n.oid = c.relnamespace
-                                                WHERE n.nspname = 'public'
-                                                    AND c.relname = 'watched_products_legacy'
+                        FROM pg_class c
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = 'public'
+                          AND c.relname = 'watched_products_legacy'
                     ) THEN
                         ALTER TABLE watched_products RENAME TO watched_products_legacy;
                     END IF;
@@ -164,16 +223,16 @@ def init_db():
                 BEGIN
                     IF EXISTS (
                         SELECT 1
-                                                FROM information_schema.tables
-                                                WHERE table_schema = 'public'
-                                                    AND table_name = 'price_history'
-                                                    AND table_type = 'BASE TABLE'
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name = 'price_history'
+                          AND table_type = 'BASE TABLE'
                     ) AND NOT EXISTS (
                         SELECT 1
-                                                FROM pg_class c
-                                                JOIN pg_namespace n ON n.oid = c.relnamespace
-                                                WHERE n.nspname = 'public'
-                                                    AND c.relname = 'price_history_legacy'
+                        FROM pg_class c
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = 'public'
+                          AND c.relname = 'price_history_legacy'
                     ) THEN
                         ALTER TABLE price_history RENAME TO price_history_legacy;
                     END IF;
@@ -209,6 +268,133 @@ def init_db():
             cur.execute("""
                 ALTER TABLE products
                 ADD COLUMN IF NOT EXISTS original_price DOUBLE PRECISION
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS original_url TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS domain TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS merchant_name TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS status TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS last_error TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS currency TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS extraction_source TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE products
+                ADD COLUMN IF NOT EXISTS extraction_confidence DOUBLE PRECISION
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET original_url = product_url
+                WHERE original_url IS NULL AND product_url IS NOT NULL
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET domain = LOWER(SPLIT_PART(REGEXP_REPLACE(product_url, '^https?://', ''), '/', 1))
+                WHERE (domain IS NULL OR domain = '')
+                  AND product_url IS NOT NULL
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET merchant_name = CASE
+                    WHEN domain LIKE '%woolworths%' THEN 'Woolworths'
+                    WHEN domain LIKE '%amazon%' THEN 'Amazon'
+                    WHEN domain LIKE '%coles%' THEN 'Coles'
+                    WHEN domain LIKE '%aldi%' THEN 'ALDI'
+                    WHEN domain LIKE '%iga%' THEN 'IGA'
+                    WHEN domain IS NOT NULL AND domain <> '' THEN INITCAP(SPLIT_PART(REPLACE(domain, 'www.', ''), '.', 1))
+                    ELSE merchant_name
+                END
+                WHERE merchant_name IS NULL OR merchant_name = ''
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET status = 'active'
+                WHERE status IS NULL OR status = ''
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET last_seen_at = COALESCE(last_checked_at, updated_at, created_at)
+                WHERE last_seen_at IS NULL
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET currency = 'AUD'
+                WHERE (currency IS NULL OR currency = '')
+                  AND (
+                    domain LIKE '%.com.au%'
+                    OR domain LIKE '%woolworths%'
+                    OR domain LIKE '%coles%'
+                    OR domain LIKE '%amazon%'
+                    OR domain LIKE '%aldi%'
+                    OR domain LIKE '%iga%'
+                  )
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET extraction_source = CASE
+                    WHEN domain LIKE '%woolworths%' THEN 'retailer:woolworths'
+                    WHEN domain LIKE '%amazon%' THEN 'retailer:amazon'
+                    WHEN domain LIKE '%coles%' THEN 'retailer:coles'
+                    WHEN domain LIKE '%aldi%' THEN 'retailer:aldi'
+                    WHEN domain LIKE '%iga%' THEN 'retailer:iga'
+                    WHEN domain IS NOT NULL AND domain <> '' THEN 'generic:legacy'
+                    ELSE extraction_source
+                END
+                WHERE extraction_source IS NULL OR extraction_source = ''
+            """)
+
+            cur.execute("""
+                UPDATE products
+                SET extraction_confidence = CASE
+                    WHEN extraction_source LIKE 'retailer:%' THEN 0.90
+                    WHEN extraction_source LIKE 'generic:%' THEN 0.60
+                    ELSE extraction_confidence
+                END
+                WHERE extraction_confidence IS NULL
             """)
 
             cur.execute("""
@@ -541,8 +727,123 @@ def revoke_session(raw_token):
         conn.commit()
 
 
+def get_snapshot_domain(snapshot):
+    parsed = urlparse(snapshot.canonical_url or "")
+    return (parsed.netloc or parsed.hostname or "").lower() or None
+
+
+def get_snapshot_merchant_name(snapshot):
+    domain = get_snapshot_domain(snapshot) or ""
+    if "woolworths" in domain:
+        return "Woolworths"
+    if "amazon" in domain:
+        return "Amazon"
+    if "coles" in domain:
+        return "Coles"
+    if "aldi" in domain:
+        return "ALDI"
+    if "iga" in domain:
+        return "IGA"
+    if not domain:
+        return None
+    host = domain.removeprefix("www.")
+    return host.split(".")[0].replace("-", " ").title()
+
+
+def get_snapshot_extraction_source(snapshot):
+    return snapshot.extraction_source or "generic:unknown"
+
+
+def get_snapshot_extraction_confidence(snapshot):
+    return snapshot.extraction_confidence
+
+
+def snapshot_from_payload(payload):
+    canonical_url = (payload.get("canonical_url") or payload.get("product_url") or "").strip()
+    if not canonical_url:
+        raise ValueError("Product URL is required.")
+
+    product_id = (payload.get("product_id") or "").strip()
+    if not product_id:
+        raise ValueError("Product identifier is required.")
+
+    return ProductSnapshot(
+        product_id=product_id,
+        name=payload.get("name"),
+        brand=payload.get("brand"),
+        price=payload.get("price"),
+        was_price=payload.get("was_price"),
+        cup_price=payload.get("cup_price"),
+        in_stock=payload.get("in_stock"),
+        availability=payload.get("availability"),
+        image_url=payload.get("image_url"),
+        canonical_url=canonical_url,
+        currency=payload.get("currency"),
+        original_url=payload.get("original_url") or canonical_url,
+        extraction_source=payload.get("extraction_source"),
+        extraction_confidence=payload.get("extraction_confidence"),
+    )
+
+
+def serialise_product_row(row):
+    if not row:
+        return None
+    return {
+        "id": row["external_product_id"],
+        "external_product_id": row["external_product_id"],
+        "original_url": row.get("original_url"),
+        "product_url": row["product_url"],
+        "domain": row.get("domain"),
+        "merchant_name": row.get("merchant_name"),
+        "status": row.get("status"),
+        "last_error": row.get("last_error"),
+        "last_error_at": row.get("last_error_at"),
+        "last_seen_at": row.get("last_seen_at"),
+        "extraction_source": row.get("extraction_source"),
+        "extraction_confidence": row.get("extraction_confidence"),
+        "name": row.get("name"),
+        "brand": row.get("brand"),
+        "current_price": row.get("current_price"),
+        "currency": row.get("currency"),
+        "original_price": row.get("original_price"),
+        "was_price": row.get("was_price"),
+        "cup_price": row.get("cup_price"),
+        "in_stock": row.get("in_stock"),
+        "image_url": row.get("image_url"),
+        "last_checked_at": row.get("last_checked_at"),
+    }
+
+
 def upsert_product_snapshot(snapshot):
     now = utc_now()
+    snapshot_domain = get_snapshot_domain(snapshot)
+    snapshot_merchant_name = get_snapshot_merchant_name(snapshot)
+    snapshot_original_url = snapshot.original_url or snapshot.canonical_url
+    snapshot_extraction_source = get_snapshot_extraction_source(snapshot)
+    snapshot_extraction_confidence = get_snapshot_extraction_confidence(snapshot)
+    common_fields = {
+        "original_url": snapshot_original_url,
+        "product_url": snapshot.canonical_url,
+        "domain": snapshot_domain,
+        "merchant_name": snapshot_merchant_name,
+        "status": "active",
+        "last_error": None,
+        "last_error_at": None,
+        "last_seen_at": now,
+        "extraction_source": snapshot_extraction_source,
+        "extraction_confidence": snapshot_extraction_confidence,
+        "name": snapshot.name,
+        "brand": snapshot.brand,
+        "current_price": snapshot.price,
+        "currency": snapshot.currency,
+        "original_price": snapshot.was_price,
+        "was_price": snapshot.was_price,
+        "cup_price": snapshot.cup_price,
+        "in_stock": snapshot.in_stock,
+        "image_url": snapshot.image_url,
+        "last_checked_at": now,
+        "updated_at": now,
+    }
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -558,80 +859,45 @@ def upsert_product_snapshot(snapshot):
 
             if existing:
                 old_price = existing["current_price"]
+                assignments = ",\n                        ".join(
+                    f"{column} = %s" for column in common_fields
+                )
                 cur.execute(
-                    """
+                    f"""
                     UPDATE products
                     SET
-                        product_url = %s,
-                        name = %s,
-                        brand = %s,
-                        current_price = %s,
-                        original_price = %s,
-                        was_price = %s,
-                        cup_price = %s,
-                        in_stock = %s,
-                        image_url = %s,
-                        last_checked_at = %s,
-                        updated_at = %s
+                        {assignments}
                     WHERE id = %s
-                    RETURNING id, external_product_id, current_price, original_price, was_price, cup_price,
-                              in_stock, image_url, product_url, name, brand, last_checked_at,
-                              created_at, updated_at
+                    RETURNING id, external_product_id, original_url, product_url, domain, merchant_name,
+                              status, last_error, last_error_at, last_seen_at,
+                              current_price, currency, original_price, was_price, cup_price,
+                              in_stock, image_url, name, brand, extraction_source,
+                              extraction_confidence, last_checked_at, created_at, updated_at
                     """,
-                    (
-                        snapshot.canonical_url,
-                        snapshot.name,
-                        snapshot.brand,
-                        snapshot.price,
-                        snapshot.was_price,
-                        snapshot.was_price,
-                        snapshot.cup_price,
-                        snapshot.in_stock,
-                        snapshot.image_url,
-                        now,
-                        now,
-                        existing["id"],
-                    ),
+                    (*common_fields.values(), existing["id"]),
                 )
                 product = cur.fetchone()
             else:
                 old_price = None
+                insert_fields = {
+                    "external_product_id": snapshot.product_id,
+                    **common_fields,
+                    "created_at": now,
+                }
+                columns_sql = ",\n                        ".join(insert_fields.keys())
+                placeholders_sql = ", ".join(["%s"] * len(insert_fields))
                 cur.execute(
-                    """
+                    f"""
                     INSERT INTO products (
-                        external_product_id,
-                        product_url,
-                        name,
-                        brand,
-                        current_price,
-                        original_price,
-                        was_price,
-                        cup_price,
-                        in_stock,
-                        image_url,
-                        last_checked_at,
-                        created_at,
-                        updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id, external_product_id, current_price, original_price, was_price, cup_price,
-                              in_stock, image_url, product_url, name, brand, last_checked_at,
-                              created_at, updated_at
+                        {columns_sql}
+                    ) VALUES ({placeholders_sql})
+                    RETURNING id, external_product_id, original_url, product_url, domain, merchant_name,
+                              status, last_error, last_error_at, last_seen_at,
+                              current_price, currency, original_price, was_price, cup_price,
+                              in_stock, image_url, name, brand, extraction_source,
+                              extraction_confidence, last_checked_at, created_at, updated_at
                     """,
-                    (
-                        snapshot.product_id,
-                        snapshot.canonical_url,
-                        snapshot.name,
-                        snapshot.brand,
-                        snapshot.price,
-                        snapshot.was_price,
-                        snapshot.was_price,
-                        snapshot.cup_price,
-                        snapshot.in_stock,
-                        snapshot.image_url,
-                        now,
-                        now,
-                        now,
-                    ),
+                    tuple(insert_fields.values()),
                 )
                 product = cur.fetchone()
 
@@ -659,6 +925,24 @@ def upsert_product_snapshot(snapshot):
         conn.commit()
 
     return product, old_price
+
+
+def mark_product_refresh_error(product_id, error_message):
+    now = utc_now()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE products
+                SET status = %s,
+                    last_error = %s,
+                    last_error_at = %s,
+                    updated_at = %s
+                WHERE external_product_id = %s
+                """,
+                ("error", error_message, now, now, product_id),
+            )
+        conn.commit()
 
 
 def add_product_to_watchlist(snapshot, *, user_id=None):
@@ -699,10 +983,20 @@ def list_products(*, user_id=None):
                     uw.last_seen_price,
                     p.id AS product_db_id,
                     p.external_product_id AS product_id,
+                    p.original_url,
                     p.product_url,
+                    p.domain,
+                    p.merchant_name,
+                    p.status,
+                    p.last_error,
+                    p.last_error_at,
+                    p.last_seen_at,
+                    p.extraction_source,
+                    p.extraction_confidence,
                     p.name,
                     p.brand,
                     p.current_price,
+                    p.currency,
                     p.original_price,
                     prev.price AS previous_price,
                     p.was_price,
@@ -735,6 +1029,51 @@ def list_products(*, user_id=None):
                 (user_id,),
             )
             return cur.fetchall()
+
+
+def get_watchlist_product(product_id, *, user_id=None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    uw.id AS watchlist_id,
+                    uw.user_id,
+                    uw.created_at,
+                    uw.last_seen_price,
+                    p.id AS product_db_id,
+                    p.external_product_id,
+                    p.original_url,
+                    p.product_url,
+                    p.domain,
+                    p.merchant_name,
+                    p.status,
+                    p.last_error,
+                    p.last_error_at,
+                    p.last_seen_at,
+                    p.extraction_source,
+                    p.extraction_confidence,
+                    p.name,
+                    p.brand,
+                    p.current_price,
+                    p.currency,
+                    p.original_price,
+                    p.was_price,
+                    p.cup_price,
+                    p.in_stock,
+                    p.image_url,
+                    p.last_checked_at
+                FROM user_watchlists uw
+                JOIN products p ON p.id = uw.product_id
+                WHERE p.external_product_id = %s
+                  AND uw.user_id IS NOT DISTINCT FROM %s
+                  AND uw.active = TRUE
+                ORDER BY uw.created_at DESC
+                LIMIT 1
+                """,
+                (product_id, user_id),
+            )
+            return cur.fetchone()
 
 
 def remove_product(product_id, *, user_id=None):
@@ -803,7 +1142,7 @@ def refresh_all_products(*, user_id=None, all_scopes=False):
             continue
         seen.add(p["product_id"])
         try:
-            snapshot = fetch_product_snapshot(p["product_url"])
+            snapshot = resolve_product_snapshot(p["product_url"], allow_cache=False)
             old_price = p["current_price"]
             upsert_product_snapshot(snapshot)
 
@@ -834,6 +1173,7 @@ def refresh_all_products(*, user_id=None, all_scopes=False):
                 increases.append(entry)
 
         except Exception as exc:
+            mark_product_refresh_error(p["product_id"], str(exc))
             errors.append(
                 {"product_id": p["product_id"], "error": str(exc)}
             )
@@ -866,7 +1206,7 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "message": "PriceWatch backend API is running.",
-                    "frontend": "Use the Next.js app at http://127.0.0.1:3000",
+                    "frontend": "Use the Vite app at http://127.0.0.1:3000",
                 },
             )
             return
@@ -877,7 +1217,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "missing ?target="})
                 return
             try:
-                snapshot = fetch_product_snapshot(target)
+                snapshot = resolve_product_snapshot(target, allow_cache=True)
                 self._send(200, snapshot.to_dict())
             except Exception as exc:
                 self._send(500, {"error": str(exc)})
@@ -889,9 +1229,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "missing ?target="})
                 return
             try:
-                snapshot = fetch_product_snapshot(target)
+                snapshot = resolve_product_snapshot(target, allow_cache=True)
                 add_product_to_watchlist(snapshot, user_id=current_user_id)
                 self._send(200, snapshot.to_dict())
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/refresh":
+            product_id = (params.get("product_id") or [""])[0].strip()
+            if not product_id:
+                self._send(400, {"error": "missing ?product_id="})
+                return
+            try:
+                item = get_watchlist_product(product_id, user_id=current_user_id)
+                if not item:
+                    self._send(404, {"error": "Product not found in watchlist."})
+                    return
+                snapshot = resolve_product_snapshot(item["product_url"], allow_cache=False)
+                add_product_to_watchlist(snapshot, user_id=current_user_id)
+                self._send(200, serialise_product_row(get_watchlist_product(product_id, user_id=current_user_id)))
             except Exception as exc:
                 self._send(500, {"error": str(exc)})
             return
@@ -997,6 +1354,19 @@ class Handler(BaseHTTPRequestHandler):
                     {"ok": True},
                     headers=self._clear_session_headers(),
                 )
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/save-preview":
+            current_user = self._get_current_user()
+            current_user_id = current_user["id"] if current_user else None
+            try:
+                snapshot = snapshot_from_payload(payload)
+                add_product_to_watchlist(snapshot, user_id=current_user_id)
+                self._send(200, snapshot.to_dict())
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
             except Exception as exc:
                 self._send(500, {"error": str(exc)})
             return

@@ -179,7 +179,7 @@ export default function HomePage() {
       return;
     }
 
-    if (name === "account" && !currentUser) {
+    if (name === "account" && appMode === "guest") {
       setCurrentPage("dashboard");
       return;
     }
@@ -376,10 +376,8 @@ export default function HomePage() {
         currentUser={currentUser}
         watchlistCount={watchlist.length}
         dropCount={dropCount}
-        theme={theme}
         appMode={appMode}
         onShowPage={showPage}
-        onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         onEnterGuest={resetToGuest}
         onLogout={logout}
       />
@@ -498,14 +496,14 @@ export default function HomePage() {
           <section className={`page ${currentPage === "check" ? "active" : ""}`}>
             <div className="page-eyebrow">Groceries</div>
             <h1 className="page-title">Price Check</h1>
-            <p className="page-sub">{appMode === "account" ? "Paste a public product URL to preview it and save it to your personal dashboard." : "Paste a public product URL to preview it and save it to your watchlist. Known stores are optimized, and other public product pages now use a best-effort generic scraper."}</p>
+            <p className="page-sub">{appMode === "account" ? "Paste a product URL to preview it and save it to your personal dashboard." : "Paste a product URL from Woolworths, Coles, IGA, or ALDI to preview it and save it to your watchlist."}</p>
             <Flash flash={flashes.check} />
             <div className="check-grid">
               <div>
                 <div className="input-card">
                   <div className="input-label">Product URL or ID</div>
                   <div className="url-row">
-                    <input className="url-input" type="text" value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); doCheck(); } }} placeholder="Paste a public product URL" />
+                    <input className="url-input" type="text" value={urlInput} onChange={(event) => setUrlInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); doCheck(); } }} placeholder="Paste a product URL from Woolworths, Coles, IGA, or ALDI" />
                     <button className="btn-primary" type="button" onClick={doCheck} disabled={checkLoading}>{checkLoading ? <span className="spin" /> : "Check"}</button>
                   </div>
                   <div className={`load-bar ${checkLoading ? "on" : ""}`}><div className="load-bar-inner" /></div>
@@ -571,25 +569,71 @@ export default function HomePage() {
             </div>
           </section>
 
-          {currentUser ? (
-            <section className={`page ${currentPage === "account" ? "active" : ""}`}>
-              <div className="page-eyebrow">Profile</div>
-              <h1 className="page-title">Account</h1>
-              <p className="page-sub">Your personal PriceWatch account and separate dashboard space.</p>
+          <section className={`page ${currentPage === "account" ? "active" : ""}`}>
+            <div className="page-eyebrow">Profile</div>
+            <h1 className="page-title">Account</h1>
+            <p className="page-sub">
+              {currentUser
+                ? "Your personal PriceWatch account settings and dashboard access."
+                : "Demo mode settings and appearance controls for this device."}
+            </p>
+            <div className="account-grid">
               <div className="input-card">
-                <div className="input-label">Signed In As</div>
+                <div className="input-label">User Details</div>
                 <div className="account-stack">
-                  <div className="tile-meta">{`${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim() || currentUser.username}</div>
-                  <div className="tile-name">@{currentUser.username}</div>
-                  <div className="tile-meta">{currentUser.email || "Email not set"}</div>
+                  {currentUser ? (
+                    <>
+                      <div className="tile-meta">{`${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim() || currentUser.username}</div>
+                      <div className="tile-name">@{currentUser.username}</div>
+                      <div className="tile-meta">{currentUser.email || "Email not set"}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="tile-name">Demo Mode</div>
+                      <div className="tile-meta">Browsing the shared sample watchlist without signing in.</div>
+                      <div className="tile-meta">No personal account data is being used in this mode.</div>
+                    </>
+                  )}
                   <div className="auth-actions top-gap">
-                    <button className="btn-primary" type="button" onClick={() => showPage("dashboard")}>Open My Dashboard</button>
-                    <button className="btn-secondary" type="button" onClick={logout}>Log Out</button>
+                    <button className="btn-primary" type="button" onClick={() => showPage("dashboard")}>
+                      Open My Dashboard
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      type="button"
+                      onClick={currentUser ? logout : resetToGuest}
+                    >
+                      {currentUser ? "Log Out" : "Leave Demo"}
+                    </button>
                   </div>
                 </div>
               </div>
-            </section>
-          ) : null}
+
+              <div className="input-card">
+                <div className="input-label">Appearance</div>
+                <div className="account-stack">
+                  <div className="tile-name">Theme</div>
+                  <div className="tile-meta">Choose the mode that feels best on this device.</div>
+                  <div className="appearance-row">
+                    <button
+                      className={`appearance-toggle ${theme === "dark" ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setTheme("dark")}
+                    >
+                      Dark Mode
+                    </button>
+                    <button
+                      className={`appearance-toggle ${theme === "light" ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setTheme("light")}
+                    >
+                      Light Mode
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </>
       )}
 

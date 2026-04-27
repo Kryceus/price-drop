@@ -47,7 +47,36 @@ class GenericScraperTests(unittest.TestCase):
         self.assertEqual(snapshot.page_type, "product")
         self.assertEqual(snapshot.fetch_mode, "http")
         self.assertEqual(snapshot.extraction_source, "http:json-ld")
+        self.assertEqual(snapshot.original_url, "https://shop.example.com/products/organic-pasta")
         self.assertIsNotNone(snapshot.extraction_confidence)
+
+    def test_prefers_meaningful_path_identifier_over_variant_slug(self):
+        html = """
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": "Broadcloth Oversized Shirt",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "49.90",
+                  "availability": "InStock",
+                  "url": "/au/en/products/E480763-000/00"
+                }
+              }
+            </script>
+          </head>
+        </html>
+        """
+
+        snapshot = build_generic_product_snapshot(
+            "https://www.uniqlo.com/au/en/products/E480763-000/00",
+            html,
+        )
+
+        self.assertEqual(snapshot.product_id, "uniqlo:E480763-000")
 
     def test_extracts_embedded_hydration_product(self):
         html = """

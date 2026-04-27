@@ -44,6 +44,7 @@ class ProductSnapshot:
     variant: str | None = None
     page_type: str | None = None
     fetch_mode: str | None = None
+    original_url: str | None = None
     extraction_source: str | None = None
     extraction_confidence: float | None = None
 
@@ -229,6 +230,7 @@ def build_snapshot(
         seller="Woolworths",
         page_type="product",
         fetch_mode="http",
+        original_url=source_url,
         extraction_source="http:woolworths-next-data",
         extraction_confidence=0.99,
     )

@@ -481,6 +481,7 @@ def _build_product_attempts(
             variant=variant,
             page_type=page_type,
             fetch_mode=context.fetch_mode,
+            original_url=context.target_url,
             extraction_source=f"{context.fetch_mode}:{source}",
             extraction_confidence=None,
         )
@@ -534,6 +535,7 @@ def _build_meta_attempt(context: DocumentContext) -> ExtractionAttempt | None:
         variant=None,
         page_type=page_type,
         fetch_mode=context.fetch_mode,
+        original_url=context.target_url,
         extraction_source=f"{context.fetch_mode}:meta",
         extraction_confidence=None,
     )
@@ -598,6 +600,7 @@ def _build_dom_attempt(context: DocumentContext) -> ExtractionAttempt | None:
         variant=_extract_dom_variant(scope),
         page_type=page_type,
         fetch_mode=context.fetch_mode,
+        original_url=context.target_url,
         extraction_source=f"{context.fetch_mode}:dom",
         extraction_confidence=None,
     )
@@ -617,8 +620,6 @@ def _build_dom_attempt(context: DocumentContext) -> ExtractionAttempt | None:
 
 
 def _should_try_browser(static_best: ExtractionAttempt | None, profile: SiteProfile) -> bool:
-    if sync_playwright is None:
-        return False
     if profile.browser_required:
         return True
     if static_best is None:
@@ -1120,8 +1121,32 @@ def _humanize_store_slug(slug: str) -> str:
 
 
 def _build_snapshot_product_id(store_slug: str, raw_product_id: str | None, parsed: urllib.parse.ParseResult) -> str:
-    suffix = raw_product_id or _normalise_identifier(_slug_from_path(parsed.path)) or "product"
+    normalised_raw = _normalise_identifier(raw_product_id)
+    suffix = (
+        normalised_raw
+        if _is_meaningful_product_identifier(normalised_raw)
+        else _normalise_identifier(_product_identifier_from_path(parsed.path))
+    ) or normalised_raw or "product"
     return f"{store_slug}:{suffix}"
+
+
+def _product_identifier_from_path(path: str) -> str | None:
+    parts = [urllib.parse.unquote(part) for part in path.split("/") if part]
+    for part in reversed(parts):
+        identifier = _normalise_identifier(part)
+        if _is_meaningful_product_identifier(identifier):
+            return identifier
+    return _slug_from_path(path)
+
+
+def _is_meaningful_product_identifier(value: str | None) -> bool:
+    if not value:
+        return False
+    if len(value) >= 4 and any(char.isalpha() for char in value):
+        return True
+    if len(value) >= 5 and any(char.isdigit() for char in value):
+        return True
+    return False
 
 
 def _slug_from_path(path: str) -> str | None:
