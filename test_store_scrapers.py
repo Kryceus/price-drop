@@ -50,6 +50,48 @@ class GenericScraperTests(unittest.TestCase):
         self.assertEqual(snapshot.original_url, "https://shop.example.com/products/organic-pasta")
         self.assertIsNotNone(snapshot.extraction_confidence)
 
+    def test_extracts_json_ld_list_price_as_was_price(self):
+        html = """
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": "Vege Crackers Honey Soy Flavoured | 75g",
+                "sku": 4352338,
+                "brand": {"@type": "Brand", "name": "Vege"},
+                "offers": [{
+                  "@type": "Offer",
+                  "priceCurrency": "AUD",
+                  "availability": "https://schema.org/InStock",
+                  "url": "https://www.coles.com.au/product/vege-crackers-honey-soy-flavoured-75g-4352338",
+                  "price": 2.45,
+                  "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "priceType": "https://schema.org/ListPrice",
+                    "price": 4.9,
+                    "priceCurrency": "AUD"
+                  }
+                }]
+              }
+            </script>
+          </head>
+        </html>
+        """
+
+        snapshot = build_generic_product_snapshot(
+            "https://www.coles.com.au/product/vege-crackers-honey-soy-flavoured-75g-4352338",
+            html,
+            store_slug="coles",
+            seller="Coles",
+        )
+
+        self.assertEqual(snapshot.product_id, "coles:vege-crackers-honey-soy-flavoured-75g-4352338")
+        self.assertEqual(snapshot.price, 2.45)
+        self.assertEqual(snapshot.was_price, 4.9)
+        self.assertEqual(snapshot.seller, "Coles")
+
     def test_prefers_meaningful_path_identifier_over_variant_slug(self):
         html = """
         <html>

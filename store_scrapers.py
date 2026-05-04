@@ -437,9 +437,7 @@ def _build_product_attempts(
         if price is None:
             continue
 
-        was_price = _coerce_price_value(
-            _first_non_empty(_first_mapped_value(offer, WAS_PRICE_KEYS), _first_mapped_value(product, WAS_PRICE_KEYS))
-        )
+        was_price = _extract_was_price(product, offer, current_price=price)
         availability = _first_non_empty(
             _first_mapped_value(offer, AVAILABILITY_KEYS),
             _first_mapped_value(product, AVAILABILITY_KEYS),
@@ -1089,6 +1087,47 @@ def _pick_offer(value: Any) -> dict[str, Any]:
             if isinstance(item, dict):
                 return item
     return {}
+
+
+def _extract_was_price(product: dict[str, Any], offer: dict[str, Any], *, current_price: float) -> float | None:
+    direct_was_price = _coerce_price_value(
+        _first_non_empty(_first_mapped_value(offer, WAS_PRICE_KEYS), _first_mapped_value(product, WAS_PRICE_KEYS))
+    )
+    if direct_was_price is not None:
+        return direct_was_price
+
+    specification_price = _extract_list_price_from_specification(offer.get("priceSpecification"))
+    if specification_price is not None:
+        return specification_price
+
+    pricing = product.get("pricing")
+    if isinstance(pricing, dict):
+        pricing_was_price = _coerce_price_value(pricing.get("was"))
+        if pricing_was_price is not None:
+            return pricing_was_price
+        savings_amount = _coerce_price_value(pricing.get("saveAmount"))
+        if savings_amount is not None and savings_amount > 0:
+            return round(current_price + savings_amount, 2)
+
+    return None
+
+
+def _extract_list_price_from_specification(value: Any) -> float | None:
+    if isinstance(value, list):
+        for item in value:
+            result = _extract_list_price_from_specification(item)
+            if result is not None:
+                return result
+        return None
+
+    if not isinstance(value, dict):
+        return None
+
+    price_type = _normalise_string(_first_non_empty(value.get("priceType"), value.get("PriceType"))) or ""
+    if "listprice" not in price_type.replace(" ", "").lower():
+        return None
+
+    return _coerce_price_value(_first_mapped_value(value, PRICE_KEYS))
 
 
 def _first_mapped_value(mapping: dict[str, Any], keys: tuple[str, ...]) -> Any:
