@@ -10,13 +10,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/lib/api";
+import {
+  disableStoredPushToken,
+  enablePushNotifications,
+  hasStoredPushToken,
+  isNativePushAvailable,
+} from "@/lib/pushNotifications";
 import { Bell, LogOut, Smartphone, User as UserIcon } from "lucide-react";
 
 export default function Account() {
   const { user, loading, login, signup, logout } = useAuth();
   const [authBusy, setAuthBusy] = useState(false);
   const [emailNotify, setEmailNotify] = useState(true);
-  const [pushNotify, setPushNotify] = useState(false);
+  const [pushNotify, setPushNotify] = useState(() => hasStoredPushToken());
+  const [pushBusy, setPushBusy] = useState(false);
 
   const [li, setLi] = useState({ identifier: "", password: "" });
   const [su, setSu] = useState({
@@ -61,8 +68,42 @@ export default function Account() {
   }
 
   async function handleLogout() {
+    await disableStoredPushToken();
     await logout();
     toast.success("Signed out");
+  }
+
+  async function handlePushToggle(enabled: boolean) {
+    if (!enabled) {
+      setPushBusy(true);
+      try {
+        await disableStoredPushToken();
+        setPushNotify(false);
+        toast.success("Push notifications turned off");
+      } catch (err) {
+        toast.error(err instanceof ApiError ? err.message : "Could not turn off push notifications");
+      } finally {
+        setPushBusy(false);
+      }
+      return;
+    }
+
+    setPushBusy(true);
+    try {
+      const result = await enablePushNotifications();
+      if (!result.ok) {
+        toast.error(result.reason);
+        setPushNotify(false);
+        return;
+      }
+      setPushNotify(true);
+      toast.success("Push notifications turned on");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not turn on push notifications");
+      setPushNotify(false);
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   if (loading) {
@@ -120,13 +161,17 @@ export default function Account() {
                   <Smartphone className="h-5 w-5 text-muted-foreground" />
                   <div>
                     <p className="text-sm font-medium">Push notifications</p>
-                    <p className="text-xs text-muted-foreground">Coming soon</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isNativePushAvailable()
+                        ? "Price drop alerts on this device"
+                        : "Available in the Android app"}
+                    </p>
                   </div>
                 </div>
                 <Switch
                   checked={pushNotify}
-                  onCheckedChange={setPushNotify}
-                  disabled
+                  onCheckedChange={handlePushToggle}
+                  disabled={pushBusy || !isNativePushAvailable()}
                 />
               </div>
             </CardContent>

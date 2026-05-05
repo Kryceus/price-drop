@@ -46,16 +46,26 @@ APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("APP_PORT", "8080"))
 SESSION_COOKIE_NAME = "pricewatch_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 FRONTEND_ORIGINS = {
     origin.strip()
     for origin in os.getenv(
         "FRONTEND_ORIGINS",
-        "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8080,http://localhost:8080",
+        "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8080,http://localhost:8080,capacitor://localhost",
     ).split(",")
     if origin.strip()
 }
 PREVIEW_CACHE_TTL_SECONDS = 90
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
+FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON")
 _snapshot_cache = {}
+_firebase_app = None
+_firebase_unavailable_reason = None
 
 
 def utc_now():
@@ -186,6 +196,39 @@ def init_db():
             """)
 
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_device_tokens (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    token TEXT NOT NULL,
+                    platform TEXT,
+                    device_label TEXT,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    last_seen_at TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notification_events (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+                    device_token_id INTEGER REFERENCES user_device_tokens(id) ON DELETE SET NULL,
+                    event_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    payload JSONB,
+                    status TEXT NOT NULL,
+                    provider_message_id TEXT,
+                    error TEXT,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    sent_at TIMESTAMPTZ
+                );
+            """)
+
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS product_price_history (
                     id SERIAL PRIMARY KEY,
                     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -256,6 +299,16 @@ def init_db():
             """)
 
             cur.execute("""
+                CREATE INDEX IF NOT EXISTS user_device_tokens_user_idx
+                ON user_device_tokens(user_id, enabled)
+            """)
+
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS notification_events_user_created_idx
+                ON notification_events(user_id, created_at DESC)
+            """)
+
+            cur.execute("""
                 CREATE INDEX IF NOT EXISTS watchlists_product_idx
                 ON user_watchlists(product_id, active)
             """)
@@ -263,6 +316,21 @@ def init_db():
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS product_price_history_product_idx
                 ON product_price_history(product_id, recorded_at DESC)
+            """)
+
+            cur.execute("""
+                ALTER TABLE user_watchlists
+                ADD COLUMN IF NOT EXISTS last_notified_price DOUBLE PRECISION
+            """)
+
+            cur.execute("""
+                ALTER TABLE user_watchlists
+                ADD COLUMN IF NOT EXISTS notify_on_drop BOOLEAN NOT NULL DEFAULT TRUE
+            """)
+
+            cur.execute("""
+                ALTER TABLE user_watchlists
+                ADD COLUMN IF NOT EXISTS notify_on_increase BOOLEAN NOT NULL DEFAULT FALSE
             """)
 
             cur.execute("""
@@ -811,6 +879,9 @@ def serialise_product_row(row):
         "in_stock": row.get("in_stock"),
         "image_url": row.get("image_url"),
         "last_checked_at": row.get("last_checked_at"),
+        "notify_on_drop": row.get("notify_on_drop"),
+        "notify_on_increase": row.get("notify_on_increase"),
+        "last_notified_price": row.get("last_notified_price"),
     }
 
 
@@ -981,6 +1052,9 @@ def list_products(*, user_id=None):
                     uw.user_id,
                     uw.created_at,
                     uw.last_seen_price,
+                    uw.notify_on_drop,
+                    uw.notify_on_increase,
+                    uw.last_notified_price,
                     p.id AS product_db_id,
                     p.external_product_id AS product_id,
                     p.original_url,
@@ -1041,6 +1115,9 @@ def get_watchlist_product(product_id, *, user_id=None):
                     uw.user_id,
                     uw.created_at,
                     uw.last_seen_price,
+                    uw.notify_on_drop,
+                    uw.notify_on_increase,
+                    uw.last_notified_price,
                     p.id AS product_db_id,
                     p.external_product_id,
                     p.original_url,
@@ -1091,6 +1168,375 @@ def remove_product(product_id, *, user_id=None):
                 (product_id, user_id),
             )
         conn.commit()
+
+
+def update_watchlist_notification_settings(product_id, *, user_id=None, notify_on_drop=True):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE user_watchlists uw
+                SET notify_on_drop = %s
+                FROM products p
+                WHERE uw.product_id = p.id
+                  AND p.external_product_id = %s
+                  AND uw.user_id IS NOT DISTINCT FROM %s
+                  AND uw.active = TRUE
+                RETURNING uw.id
+                """,
+                (notify_on_drop, product_id, user_id),
+            )
+            updated = cur.fetchone()
+        conn.commit()
+
+    if not updated:
+        return None
+    return get_watchlist_product(product_id, user_id=user_id)
+
+
+def _hash_device_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def register_device_token(*, user_id, token, platform=None, device_label=None):
+    if not user_id:
+        raise ValueError("You must be logged in to enable notifications.")
+    token = (token or "").strip()
+    if not token:
+        raise ValueError("Device token is required.")
+
+    now = utc_now()
+    token_hash = _hash_device_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_device_tokens (
+                    user_id,
+                    token_hash,
+                    token,
+                    platform,
+                    device_label,
+                    enabled,
+                    last_seen_at,
+                    created_at,
+                    updated_at
+                ) VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s, %s)
+                ON CONFLICT (token_hash)
+                DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    token = EXCLUDED.token,
+                    platform = EXCLUDED.platform,
+                    device_label = EXCLUDED.device_label,
+                    enabled = TRUE,
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id, user_id, platform, device_label, enabled, last_seen_at, created_at, updated_at
+                """,
+                (
+                    user_id,
+                    token_hash,
+                    token,
+                    _normalise_notification_platform(platform),
+                    _normalise_optional_text(device_label, max_length=120),
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
+
+
+def disable_device_token(*, user_id, token):
+    if not user_id:
+        raise ValueError("You must be logged in to update notifications.")
+    token = (token or "").strip()
+    if not token:
+        raise ValueError("Device token is required.")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE user_device_tokens
+                SET enabled = FALSE,
+                    updated_at = %s
+                WHERE user_id = %s
+                  AND token_hash = %s
+                RETURNING id
+                """,
+                (utc_now(), user_id, _hash_device_token(token)),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row is not None
+
+
+def _normalise_notification_platform(value):
+    text = _normalise_optional_text(value, max_length=40)
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {"android", "ios", "web"}:
+        return lowered
+    return "other"
+
+
+def _normalise_optional_text(value, *, max_length):
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
+def _get_firebase_messaging():
+    global _firebase_app, _firebase_unavailable_reason
+    if _firebase_unavailable_reason:
+        return None
+
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+    except Exception as exc:
+        _firebase_unavailable_reason = f"firebase-admin is not installed: {exc}"
+        return None
+
+    if _firebase_app is None:
+        try:
+            if FIREBASE_CREDENTIALS_JSON:
+                service_account = json.loads(FIREBASE_CREDENTIALS_JSON)
+                credential = credentials.Certificate(service_account)
+            elif FIREBASE_CREDENTIALS_PATH:
+                credential = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+            else:
+                _firebase_unavailable_reason = (
+                    "Firebase credentials are not configured. Set FIREBASE_CREDENTIALS_JSON or FIREBASE_CREDENTIALS_PATH."
+                )
+                return None
+            _firebase_app = firebase_admin.initialize_app(credential)
+        except ValueError:
+            _firebase_app = firebase_admin.get_app()
+        except Exception as exc:
+            _firebase_unavailable_reason = f"Firebase initialization failed: {exc}"
+            return None
+
+    return messaging
+
+
+def firebase_status():
+    messaging = _get_firebase_messaging()
+    return {
+        "configured": messaging is not None,
+        "error": _firebase_unavailable_reason,
+    }
+
+
+def send_price_notification_to_user(*, user_id, product_id, event_type, title, body, data):
+    messaging = _get_firebase_messaging()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, token
+                FROM user_device_tokens
+                WHERE user_id = %s
+                  AND enabled = TRUE
+                """,
+                (user_id,),
+            )
+            tokens = cur.fetchall()
+
+            results = []
+            for token_row in tokens:
+                if messaging is None:
+                    results.append(
+                        _record_notification_event(
+                            cur,
+                            user_id=user_id,
+                            product_id=product_id,
+                            device_token_id=token_row["id"],
+                            event_type=event_type,
+                            title=title,
+                            body=body,
+                            data=data,
+                            status="skipped",
+                            error=_firebase_unavailable_reason,
+                        )
+                    )
+                    continue
+
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=title, body=body),
+                        data={key: str(value) for key, value in data.items() if value is not None},
+                        token=token_row["token"],
+                    )
+                    provider_message_id = messaging.send(message)
+                    results.append(
+                        _record_notification_event(
+                            cur,
+                            user_id=user_id,
+                            product_id=product_id,
+                            device_token_id=token_row["id"],
+                            event_type=event_type,
+                            title=title,
+                            body=body,
+                            data=data,
+                            status="sent",
+                            provider_message_id=provider_message_id,
+                        )
+                    )
+                except Exception as exc:
+                    results.append(
+                        _record_notification_event(
+                            cur,
+                            user_id=user_id,
+                            product_id=product_id,
+                            device_token_id=token_row["id"],
+                            event_type=event_type,
+                            title=title,
+                            body=body,
+                            data=data,
+                            status="failed",
+                            error=str(exc),
+                        )
+                    )
+
+            conn.commit()
+    return results
+
+
+def _record_notification_event(
+    cur,
+    *,
+    user_id,
+    product_id,
+    device_token_id,
+    event_type,
+    title,
+    body,
+    data,
+    status,
+    provider_message_id=None,
+    error=None,
+):
+    now = utc_now()
+    cur.execute(
+        """
+        INSERT INTO notification_events (
+            user_id,
+            product_id,
+            device_token_id,
+            event_type,
+            title,
+            body,
+            payload,
+            status,
+            provider_message_id,
+            error,
+            created_at,
+            sent_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
+        RETURNING id, status, error
+        """,
+        (
+            user_id,
+            product_id,
+            device_token_id,
+            event_type,
+            title,
+            body,
+            json.dumps(data),
+            status,
+            provider_message_id,
+            error,
+            now,
+            now if status == "sent" else None,
+        ),
+    )
+    return cur.fetchone()
+
+
+def notify_watchlists_for_price_change(product, *, old_price, new_price, has_drop, has_increase):
+    if not (has_drop or has_increase):
+        return []
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, user_id, notify_on_drop, notify_on_increase, last_notified_price
+                FROM user_watchlists
+                WHERE product_id = %s
+                  AND active = TRUE
+                  AND user_id IS NOT NULL
+                """,
+                (product["id"],),
+            )
+            watchlists = cur.fetchall()
+
+    notifications = []
+    for watchlist in watchlists:
+        should_notify = (
+            has_drop and watchlist["notify_on_drop"]
+        ) or (
+            has_increase and watchlist["notify_on_increase"]
+        )
+        if not should_notify:
+            continue
+        if watchlist["last_notified_price"] == new_price:
+            continue
+
+        event_type = "price_drop" if has_drop else "price_increase"
+        title = "Price drop" if has_drop else "Price increased"
+        product_name = product.get("name") or "Tracked product"
+        if has_drop:
+            body = f"{product_name} dropped from {_format_money(old_price)} to {_format_money(new_price)}."
+        else:
+            body = f"{product_name} increased from {_format_money(old_price)} to {_format_money(new_price)}."
+        data = {
+            "event_type": event_type,
+            "product_id": product["external_product_id"],
+            "product_name": product_name,
+            "old_price": old_price,
+            "new_price": new_price,
+            "product_url": product.get("product_url"),
+        }
+
+        results = send_price_notification_to_user(
+            user_id=watchlist["user_id"],
+            product_id=product["id"],
+            event_type=event_type,
+            title=title,
+            body=body,
+            data=data,
+        )
+        notifications.extend(results)
+
+        if any(row.get("status") == "sent" for row in results):
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE user_watchlists
+                        SET last_notified_price = %s
+                        WHERE id = %s
+                        """,
+                        (new_price, watchlist["id"]),
+                    )
+                conn.commit()
+
+    return notifications
+
+
+def _format_money(value):
+    if value is None:
+        return "unknown"
+    return f"${float(value):.2f}"
 
 
 def get_price_history(product_id, *, user_id=None):
@@ -1144,7 +1590,7 @@ def refresh_all_products(*, user_id=None, all_scopes=False):
         try:
             snapshot = resolve_product_snapshot(p["product_url"], allow_cache=False)
             old_price = p["current_price"]
-            upsert_product_snapshot(snapshot)
+            product, _ = upsert_product_snapshot(snapshot)
 
             has_drop = (
                 old_price is not None
@@ -1171,6 +1617,23 @@ def refresh_all_products(*, user_id=None, all_scopes=False):
                 drops.append(entry)
             if has_increase:
                 increases.append(entry)
+
+            notification_results = notify_watchlists_for_price_change(
+                product,
+                old_price=old_price,
+                new_price=snapshot.price,
+                has_drop=has_drop,
+                has_increase=has_increase,
+            )
+            if notification_results:
+                entry["notifications"] = [
+                    {
+                        "id": row.get("id"),
+                        "status": row.get("status"),
+                        "error": row.get("error"),
+                    }
+                    for row in notification_results
+                ]
 
         except Exception as exc:
             mark_product_refresh_error(p["product_id"], str(exc))
@@ -1290,6 +1753,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": str(exc)})
             return
 
+        if parsed.path == "/notifications/status":
+            self._send(200, firebase_status())
+            return
+
         if parsed.path == "/auth/me":
             user = self._get_current_user()
             self._send(200, {"user": sanitise_user_row(user)})
@@ -1358,6 +1825,107 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": str(exc)})
             return
 
+        if parsed.path == "/notification-settings":
+            current_user = self._get_current_user()
+            current_user_id = current_user["id"] if current_user else None
+            try:
+                product_id = (payload.get("product_id") or "").strip()
+                if not product_id:
+                    raise ValueError("Product identifier is required.")
+                notify_on_drop = bool(payload.get("notify_on_drop"))
+                item = update_watchlist_notification_settings(
+                    product_id,
+                    user_id=current_user_id,
+                    notify_on_drop=notify_on_drop,
+                )
+                if not item:
+                    self._send(404, {"error": "Product not found in watchlist."})
+                    return
+                self._send(200, serialise_product_row(item))
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/notification-token":
+            current_user = self._get_current_user()
+            current_user_id = current_user["id"] if current_user else None
+            try:
+                row = register_device_token(
+                    user_id=current_user_id,
+                    token=payload.get("token"),
+                    platform=payload.get("platform"),
+                    device_label=payload.get("device_label"),
+                )
+                self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "device_token": {
+                            "id": row["id"],
+                            "platform": row.get("platform"),
+                            "device_label": row.get("device_label"),
+                            "enabled": row.get("enabled"),
+                            "last_seen_at": row.get("last_seen_at"),
+                        },
+                    },
+                )
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/notification-token/remove":
+            current_user = self._get_current_user()
+            current_user_id = current_user["id"] if current_user else None
+            try:
+                disabled = disable_device_token(
+                    user_id=current_user_id,
+                    token=payload.get("token"),
+                )
+                self._send(200, {"ok": True, "disabled": disabled})
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/notifications/test":
+            current_user = self._get_current_user()
+            current_user_id = current_user["id"] if current_user else None
+            try:
+                if not current_user_id:
+                    raise ValueError("You must be logged in to test notifications.")
+                results = send_price_notification_to_user(
+                    user_id=current_user_id,
+                    product_id=None,
+                    event_type="test",
+                    title="Price Drop notifications are ready",
+                    body="Your device can receive alerts from Price Drop.",
+                    data={"event_type": "test"},
+                )
+                self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "notifications": [
+                            {
+                                "id": row.get("id"),
+                                "status": row.get("status"),
+                                "error": row.get("error"),
+                            }
+                            for row in results
+                        ],
+                    },
+                )
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception as exc:
+                self._send(500, {"error": str(exc)})
+            return
+
         if parsed.path == "/save-preview":
             current_user = self._get_current_user()
             current_user_id = current_user["id"] if current_user else None
@@ -1402,17 +1970,19 @@ class Handler(BaseHTTPRequestHandler):
         return get_user_by_session_token(self._get_session_token())
 
     def _session_headers(self, token, expires_at):
+        secure = " Secure;" if SESSION_COOKIE_SECURE else ""
         return {
             "Set-Cookie": (
-                f"{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; "
+                f"{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite={SESSION_COOKIE_SAMESITE};{secure} "
                 f"Expires={expires_at.strftime('%a, %d %b %Y %H:%M:%S GMT')}"
             )
         }
 
     def _clear_session_headers(self):
+        secure = " Secure;" if SESSION_COOKIE_SECURE else ""
         return {
             "Set-Cookie": (
-                f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; "
+                f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite={SESSION_COOKIE_SAMESITE};{secure} "
                 "Expires=Thu, 01 Jan 1970 00:00:00 GMT"
             )
         }

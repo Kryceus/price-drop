@@ -3,6 +3,10 @@
 __pycache__/
 *.pyc
 *.log
+firebase-service-account.json
+*-service-account.json
+android/app/google-services.json
+android/app/*firebase-adminsdk*.json
 node_modules/
 .next/
 dist/

@@ -106,6 +106,9 @@ export interface WatchlistItem extends Product {
   watchlist_id?: number;
   last_seen_price?: number | null;
   previous_price?: number | null;
+  notify_on_drop?: boolean | null;
+  notify_on_increase?: boolean | null;
+  last_notified_price?: number | null;
   active?: boolean;
 }
 
@@ -123,6 +126,11 @@ export interface RefreshSummaryItem {
   new_price: number | null;
   has_drop: boolean;
   has_increase: boolean;
+  notifications?: Array<{
+    id?: number;
+    status?: string;
+    error?: string | null;
+  }>;
 }
 
 export interface RefreshSummary {
@@ -199,6 +207,9 @@ function normaliseWatchlistItem(raw: unknown): WatchlistItem {
       typeof row.watchlist_id === "number" ? row.watchlist_id : undefined,
     last_seen_price: asNullableNumber(row.last_seen_price),
     previous_price: asNullableNumber(row.previous_price),
+    notify_on_drop: asNullableBoolean(row.notify_on_drop),
+    notify_on_increase: asNullableBoolean(row.notify_on_increase),
+    last_notified_price: asNullableNumber(row.last_notified_price),
     active: typeof row.active === "boolean" ? row.active : undefined,
   };
 }
@@ -285,8 +296,55 @@ export const products = {
   remove: (productId: string) =>
     request<Json>(`/remove?product_id=${encodeURIComponent(productId)}`),
 
+  async updateNotificationSettings(
+    productId: string,
+    payload: { notify_on_drop: boolean },
+  ): Promise<{ product: WatchlistItem }> {
+    const raw = await request<unknown>("/notification-settings", {
+      method: "POST",
+      body: JSON.stringify({
+        product_id: productId,
+        notify_on_drop: payload.notify_on_drop,
+      }),
+    });
+    return { product: normaliseWatchlistItem(raw) };
+  },
+
   history: (productId: string) =>
     request<{ history: PriceHistoryPoint[] }>(
       `/history?product_id=${encodeURIComponent(productId)}`,
     ),
+};
+
+export const notifications = {
+  status: () =>
+    request<{ configured: boolean; error: string | null }>(
+      "/notifications/status",
+    ),
+
+  registerToken: (payload: {
+    token: string;
+    platform?: "android" | "ios" | "web" | "other";
+    device_label?: string;
+  }) =>
+    request<Json>("/notification-token", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  removeToken: (token: string) =>
+    request<Json>("/notification-token/remove", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
+  sendTest: () =>
+    request<{
+      ok: boolean;
+      notifications: Array<{
+        id?: number;
+        status?: string;
+        error?: string | null;
+      }>;
+    }>("/notifications/test", { method: "POST" }),
 };
