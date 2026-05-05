@@ -42,6 +42,7 @@ DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "pricecompare")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DATABASE_URL = os.getenv("DATABASE_URL")
 APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("APP_PORT", "8080"))
 SESSION_COOKIE_NAME = "pricewatch_session"
@@ -117,6 +118,9 @@ def resolve_product_snapshot(target, *, allow_cache=False):
 
 
 def get_conn():
+    if DATABASE_URL:
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
     return psycopg.connect(
         host=DB_HOST,
         port=DB_PORT,

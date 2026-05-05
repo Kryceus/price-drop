@@ -7,20 +7,16 @@ Deploy the Python backend separately from Google Play. Google Play only distribu
 Required production environment variables:
 
 ```bash
-DB_HOST=
-DB_PORT=5432
-DB_NAME=
-DB_USER=
-DB_PASSWORD=
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 APP_HOST=0.0.0.0
-APP_PORT=8080
+APP_PORT=${{PORT}}
 FRONTEND_ORIGINS=capacitor://localhost,https://your-web-frontend.example
 SESSION_COOKIE_SAMESITE=None
 SESSION_COOKIE_SECURE=true
 FIREBASE_CREDENTIALS_JSON={"type":"service_account",...}
 ```
 
-Use a managed PostgreSQL database. On startup, `server.py` runs `init_db()` and creates the notification tables.
+Use a managed PostgreSQL database. On Railway, add a PostgreSQL service to the same project, then set `DATABASE_URL` from that service. On startup, `server.py` runs `init_db()` and creates the notification tables.
 
 For scheduled price checks, run:
 
