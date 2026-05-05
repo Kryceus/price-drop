@@ -37,12 +37,23 @@ def load_env_file():
 
 load_env_file()
 
+
+def normalise_env_assignment(value, key):
+    if not value:
+        return value
+    value = value.strip().strip("\"'")
+    prefix = f"{key}="
+    if value.startswith(prefix):
+        return value[len(prefix):].strip().strip("\"'")
+    return value
+
+
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "pricecompare")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = normalise_env_assignment(os.getenv("DATABASE_URL"), "DATABASE_URL")
 APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("APP_PORT") or os.getenv("PORT") or "8080")
 SESSION_COOKIE_NAME = "pricewatch_session"
@@ -63,7 +74,10 @@ FRONTEND_ORIGINS = {
 }
 PREVIEW_CACHE_TTL_SECONDS = 90
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
-FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON")
+FIREBASE_CREDENTIALS_JSON = normalise_env_assignment(
+    os.getenv("FIREBASE_CREDENTIALS_JSON"),
+    "FIREBASE_CREDENTIALS_JSON",
+)
 _snapshot_cache = {}
 _firebase_app = None
 _firebase_unavailable_reason = None
