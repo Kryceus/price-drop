@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Search, Sparkles } from "lucide-react";
+import { ExternalLink, Search, Sparkles } from "lucide-react";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { EmptyState } from "@/components/EmptyState";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductCardSkeleton } from "@/components/ProductCardSkeleton";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError, products, type Product } from "@/lib/api";
+
+const retailerLinks = [
+  { name: "Woolworths", href: "https://www.woolworths.com.au/" },
+  { name: "Coles", href: "https://www.coles.com.au/" },
+  { name: "ALDI", href: "https://www.aldi.com.au/" },
+  { name: "IGA", href: "https://www.igashop.com.au/" },
+];
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -34,7 +40,27 @@ export default function Home() {
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : "Could not fetch product";
-      toast.error(msg);
+      if (!user) {
+        toast.error(msg);
+      } else {
+        toast.message("Live check failed", {
+          description: "Save this product and Price Drop will check it on the next scheduled run.",
+          action: {
+            label: "Save",
+            onClick: async () => {
+              try {
+                await products.save(url.trim());
+                toast.success("Saved for the next scheduled price check");
+                navigate("/dashboard");
+              } catch (saveErr) {
+                toast.error(
+                  saveErr instanceof ApiError ? saveErr.message : "Could not save",
+                );
+              }
+            },
+          },
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -112,11 +138,34 @@ export default function Home() {
             />
           )}
           {!loading && !product && (
-            <EmptyState
-              icon={<Sparkles className="h-6 w-6" />}
-              title="Find a deal"
-              description="Paste a product link from Woolworths or another supported store to see its current price, then save it to track changes."
-            />
+            <div className="rounded-2xl border border-dashed border-border bg-card/50 px-5 py-8 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <h3 className="font-display text-lg font-semibold">Find a deal</h3>
+              <ol className="mx-auto mt-3 max-w-sm space-y-1 text-left text-sm text-muted-foreground">
+                <li>1. Open a supported store below.</li>
+                <li>2. Copy the product page link.</li>
+                <li>3. Paste it above and check the price.</li>
+                <li>4. Save it to your dashboard to track changes.</li>
+              </ol>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                {retailerLinks.map((retailer) => (
+                  <Button
+                    key={retailer.name}
+                    asChild
+                    variant="secondary"
+                    size="sm"
+                    className="gap-1.5"
+                  >
+                    <a href={retailer.href} target="_blank" rel="noreferrer">
+                      {retailer.name}
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </Button>
+                ))}
+              </div>
+            </div>
           )}
         </section>
       </div>

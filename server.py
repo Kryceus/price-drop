@@ -8,6 +8,7 @@ import json
 import os
 import hashlib
 import hmac
+import re
 import secrets
 import time
 
@@ -73,6 +74,7 @@ FRONTEND_ORIGINS = {
     if origin.strip()
 }
 PREVIEW_CACHE_TTL_SECONDS = 90
+WOOLWORTHS_PRODUCT_ID_RE = re.compile(r"/shop/productdetails/(\d+)")
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
 FIREBASE_CREDENTIALS_JSON = normalise_env_assignment(
     os.getenv("FIREBASE_CREDENTIALS_JSON"),
@@ -1060,6 +1062,136 @@ def add_product_to_watchlist(snapshot, *, user_id=None):
     return product
 
 
+def _product_id_from_queued_target(normalized):
+    parsed = urlparse(normalized.normalized_url)
+    host = (parsed.hostname or normalized.domain or "").lower()
+
+    if "woolworths.com.au" in host:
+        match = WOOLWORTHS_PRODUCT_ID_RE.search(parsed.path)
+        if match:
+            return match.group(1)
+
+    digest = hashlib.sha256(normalized.normalized_url.encode("utf-8")).hexdigest()[:16]
+    store_slug = host.removeprefix("www.").split(".")[0] or "product"
+    return f"{store_slug}:{digest}"
+
+
+def queue_product_for_scheduled_refresh(target, *, user_id=None, error_message=None):
+    normalized = normalize_target_url(target)
+    now = utc_now()
+    external_product_id = _product_id_from_queued_target(normalized)
+    merchant_name = get_snapshot_merchant_name(
+        ProductSnapshot(
+            product_id=external_product_id,
+            name=None,
+            brand=None,
+            price=None,
+            was_price=None,
+            cup_price=None,
+            in_stock=None,
+            availability=None,
+            image_url=None,
+            canonical_url=normalized.normalized_url,
+            currency=None,
+            original_url=normalized.original_url,
+        )
+    )
+    last_error = error_message or "Queued for the next scheduled price check."
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO products (
+                    external_product_id,
+                    original_url,
+                    product_url,
+                    domain,
+                    merchant_name,
+                    status,
+                    last_error,
+                    last_error_at,
+                    last_seen_at,
+                    extraction_source,
+                    extraction_confidence,
+                    name,
+                    brand,
+                    current_price,
+                    currency,
+                    original_price,
+                    was_price,
+                    cup_price,
+                    in_stock,
+                    image_url,
+                    last_checked_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (external_product_id) DO UPDATE
+                SET original_url = EXCLUDED.original_url,
+                    product_url = EXCLUDED.product_url,
+                    domain = EXCLUDED.domain,
+                    merchant_name = EXCLUDED.merchant_name,
+                    status = EXCLUDED.status,
+                    last_error = EXCLUDED.last_error,
+                    last_error_at = EXCLUDED.last_error_at,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id, external_product_id, original_url, product_url, domain, merchant_name,
+                          status, last_error, last_error_at, last_seen_at,
+                          current_price, currency, original_price, was_price, cup_price,
+                          in_stock, image_url, name, brand, extraction_source,
+                          extraction_confidence, last_checked_at, created_at, updated_at
+                """,
+                (
+                    external_product_id,
+                    normalized.original_url,
+                    normalized.normalized_url,
+                    normalized.domain,
+                    merchant_name,
+                    "queued",
+                    last_error,
+                    now,
+                    now,
+                    "queued:scheduled-refresh",
+                    0.0,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    now,
+                    now,
+                ),
+            )
+            product = cur.fetchone()
+            cur.execute(
+                """
+                INSERT INTO user_watchlists (
+                    user_id,
+                    product_id,
+                    created_at,
+                    last_seen_price
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT ((COALESCE(user_id, 0)), product_id)
+                DO UPDATE SET active = TRUE
+                RETURNING id
+                """,
+                (user_id, product["id"], now, product["current_price"]),
+            )
+            cur.fetchone()
+        conn.commit()
+
+    return product
+
+
 def list_products(*, user_id=None):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1714,7 +1846,22 @@ class Handler(BaseHTTPRequestHandler):
                 add_product_to_watchlist(snapshot, user_id=current_user_id)
                 self._send(200, snapshot.to_dict())
             except Exception as exc:
-                self._send(500, {"error": str(exc)})
+                try:
+                    product = queue_product_for_scheduled_refresh(
+                        target,
+                        user_id=current_user_id,
+                        error_message=f"Live price check failed: {exc}",
+                    )
+                    self._send(
+                        202,
+                        {
+                            **serialise_product_row(product),
+                            "queued": True,
+                            "message": "Saved for the next scheduled price check.",
+                        },
+                    )
+                except Exception as queue_exc:
+                    self._send(500, {"error": str(queue_exc)})
             return
 
         if parsed.path == "/refresh":

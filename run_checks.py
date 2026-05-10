@@ -12,7 +12,7 @@ from datetime import datetime
 import server
 
 
-DEFAULT_INTERVAL_SECONDS = 6 * 60 * 60
+DEFAULT_INTERVAL_SECONDS = 3 * 60 * 60
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
         "--interval-seconds",
         type=int,
         default=int(os.getenv("CHECK_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)),
-        help="Seconds between automated check runs. Defaults to 21600 (6 hours).",
+        help="Seconds between automated check runs. Defaults to 10800 (3 hours).",
     )
     return parser.parse_args()
 
@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
 def run_once() -> int:
     started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{started_at}] Starting automated product check...")
+    server.init_db()
     result = server.refresh_all_products(all_scopes=True)
 
     updated = len(result["updated"])

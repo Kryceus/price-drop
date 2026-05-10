@@ -21,10 +21,17 @@ Use a managed PostgreSQL database. On Railway, add a PostgreSQL service to the s
 For scheduled price checks, run:
 
 ```bash
-python run_checks.py
+python run_checks.py --once
 ```
 
-On Railway, this is usually a second worker/process using the same code and database.
+On Railway, configure this as a Cron service using the same code and database.
+Use this cron schedule to check watched products every 3 hours:
+
+```cron
+0 */3 * * *
+```
+
+The Android app should read saved product data from the backend. If a live scrape is blocked, `/save` queues the product for this scheduled checker instead of requiring the user request to scrape immediately.
 
 ## Firebase
 
